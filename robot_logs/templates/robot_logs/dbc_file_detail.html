@@ -1,0 +1,195 @@
+{% extends 'robot_logs/base.html' %}
+{% load static %}
+
+{% block title %}Détails du fichier DBC | LogViewer{% endblock %}
+
+{% block content %}
+<div class="container-fluid mt-4">
+    <div class="row">
+        <div class="col-12">
+            <nav aria-label="breadcrumb">
+                <ol class="breadcrumb">
+                    <li class="breadcrumb-item"><a href="{% url 'robot_logs:log_list' %}">Accueil</a></li>
+                    <li class="breadcrumb-item"><a href="{% url 'robot_logs:dbc_file_list' %}">Fichiers DBC</a></li>
+                    <li class="breadcrumb-item active" aria-current="page">{{ dbc_file.name }}</li>
+                </ol>
+            </nav>
+            
+            <div class="card mb-4">
+                <div class="card-header bg-primary text-white">
+                    <h5 class="card-title mb-0">Détails du fichier DBC</h5>
+                </div>
+                <div class="card-body">
+                    <div class="row">
+                        <div class="col-md-6">
+                            <h4>Informations générales</h4>
+                            <table class="table table-bordered">
+                                <tr>
+                                    <th>Nom</th>
+                                    <td>{{ dbc_file.name }}</td>
+                                </tr>
+                                <tr>
+                                    <th>Description</th>
+                                    <td>{{ dbc_file.description|default:"-" }}</td>
+                                </tr>
+                                <tr>
+                                    <th>Date de téléchargement</th>
+                                    <td>{{ dbc_file.uploaded_at|date:"d/m/Y H:i" }}</td>
+                                </tr>
+                                <tr>
+                                    <th>Fichier</th>
+                                    <td>
+                                        <a href="{{ dbc_file.file.url }}" class="btn btn-sm btn-secondary">
+                                            <i class="fas fa-download"></i> Télécharger
+                                        </a>
+                                    </td>
+                                </tr>
+                            </table>
+                        </div>
+                        <div class="col-md-6">
+                            <h4>Utilisation</h4>
+                            {% if dbc_file.mdf_files.count > 0 %}
+                                <p>Ce fichier DBC est utilisé par {{ dbc_file.mdf_files.count }} fichier(s) MDF :</p>
+                                <ul class="list-group">
+                                    {% for mdf_file in dbc_file.mdf_files.all %}
+                                        <li class="list-group-item">
+                                            <a href="{% url 'robot_logs:log_list' %}?mdf_file={{ mdf_file.id }}">
+                                                {{ mdf_file.name }}
+                                            </a>
+                                            <small class="text-muted">Importé le {{ mdf_file.uploaded_at|date:"d/m/Y H:i" }}</small>
+                                        </li>
+                                    {% endfor %}
+                                </ul>
+                            {% else %}
+                                <div class="alert alert-info">
+                                    <p>Ce fichier DBC n'est pas encore utilisé par des fichiers MDF.</p>
+                                    <p>Pour l'utiliser, sélectionnez-le lors de l'importation d'un nouveau fichier MDF.</p>
+                                </div>
+                            {% endif %}
+                        </div>
+                    </div>
+                </div>
+            </div>
+            
+            {% if error %}
+                <div class="alert alert-danger">
+                    <h5><i class="fas fa-exclamation-triangle"></i> Erreur lors du parsing du fichier DBC</h5>
+                    <p>{{ error }}</p>
+                </div>
+            {% else %}
+                <div class="card">
+                    <div class="card-header bg-info text-white">
+                        <h5 class="card-title mb-0">Contenu du fichier DBC</h5>
+                    </div>
+                    <div class="card-body">
+                        {% if messages_count > 0 %}
+                            <p>Ce fichier DBC contient <strong>{{ messages_count }}</strong> définitions de messages CAN.</p>
+                            
+                            <div class="table-responsive">
+                                <table class="table table-striped table-hover" id="messagesTable">
+                                    <thead>
+                                        <tr>
+                                            <th>ID</th>
+                                            <th>Nom</th>
+                                            <th>Longueur</th>
+                                            <th>Nombre de signaux</th>
+                                            <th>Commentaire</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody>
+                                        {% for message in messages %}
+                                            <tr>
+                                                <td><code>{{ message.id }}</code></td>
+                                                <td>{{ message.name }}</td>
+                                                <td>{{ message.length }} octets</td>
+                                                <td>{{ message.signals_count }}</td>
+                                                <td>{{ message.comment|default:"-" }}</td>
+                                            </tr>
+                                        {% endfor %}
+                                    </tbody>
+                                </table>
+                            </div>
+                            
+                            <div class="mt-3">
+                                <p class="text-muted">
+                                    <small>Parser utilisé : {{ parser_type }}</small>
+                                </p>
+                            </div>
+                        {% else %}
+                            <div class="alert alert-warning">
+                                <p>Aucun message CAN n'a pu être extrait de ce fichier DBC.</p>
+                                <p>Vérifiez que le fichier est un DBC valide et qu'il contient des définitions de messages.</p>
+                            </div>
+                        {% endif %}
+                    </div>
+                </div>
+            {% endif %}
+            
+            <div class="mt-4 mb-5 text-center">
+                <a href="{% url 'robot_logs:dbc_file_list' %}" class="btn btn-secondary">
+                    <i class="fas fa-arrow-left"></i> Retour à la liste
+                </a>
+                
+                <button type="button" class="btn btn-danger" data-toggle="modal" data-target="#deleteModal">
+                    <i class="fas fa-trash"></i> Supprimer ce fichier
+                </button>
+                
+                <!-- Modal de confirmation de suppression -->
+                <div class="modal fade" id="deleteModal" tabindex="-1" role="dialog" aria-hidden="true">
+                    <div class="modal-dialog" role="document">
+                        <div class="modal-content">
+                            <div class="modal-header">
+                                <h5 class="modal-title">Confirmation de suppression</h5>
+                                <button type="button" class="close" data-dismiss="modal" aria-label="Close">
+                                    <span aria-hidden="true">&times;</span>
+                                </button>
+                            </div>
+                            <div class="modal-body">
+                                <p>Êtes-vous sûr de vouloir supprimer le fichier DBC <strong>{{ dbc_file.name }}</strong> ?</p>
+                                {% if dbc_file.mdf_files.count > 0 %}
+                                    <div class="alert alert-warning">
+                                        <i class="fas fa-exclamation-triangle"></i>
+                                        Ce fichier DBC est utilisé par {{ dbc_file.mdf_files.count }} fichier(s) MDF.
+                                    </div>
+                                {% endif %}
+                            </div>
+                            <div class="modal-footer">
+                                <button type="button" class="btn btn-secondary" data-dismiss="modal">Annuler</button>
+                                <form action="{% url 'robot_logs:dbc_file_delete' dbc_file.id %}" method="post">
+                                    {% csrf_token %}
+                                    <button type="submit" class="btn btn-danger">Supprimer</button>
+                                </form>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+    $(document).ready(function() {
+        // Initialiser le tableau de messages avec DataTables
+        $('#messagesTable').DataTable({
+            responsive: true,
+            pageLength: 10,
+            language: {
+                search: "Rechercher:",
+                lengthMenu: "Afficher _MENU_ entrées",
+                info: "Affichage de _START_ à _END_ sur _TOTAL_ entrées",
+                infoEmpty: "Aucune entrée à afficher",
+                infoFiltered: "(filtré sur _MAX_ entrées au total)",
+                paginate: {
+                    first: "Premier",
+                    last: "Dernier",
+                    next: "Suivant",
+                    previous: "Précédent"
+                }
+            }
+        });
+    });
+</script>
+{% endblock %}
