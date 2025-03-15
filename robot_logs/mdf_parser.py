@@ -1,5 +1,6 @@
 """
-Module pour parser les fichiers MDF (Measurement Data Format) de Vector
+Module pour parser les fichiers MDF (Measurement Data Format) de Vector.
+Version corrigée pour gérer les canaux dupliqués dans les fichiers MDF.
 """
 import os
 import json
@@ -57,7 +58,20 @@ class MDFParser:
             if not self.open():
                 return []
         
-        return list(self._mdf.channels_db.keys())
+        # Filtrer les canaux dupliqués pour n'avoir que les noms uniques
+        unique_channels = []
+        seen_channels = set()
+        
+        for channel_name in self._mdf.channels_db.keys():
+            # Ignorer les canaux de temps pour éviter les erreurs
+            if channel_name.lower() in ('time', 'timestamp'):
+                continue
+            
+            if channel_name not in seen_channels:
+                unique_channels.append(channel_name)
+                seen_channels.add(channel_name)
+        
+        return unique_channels
     
     def get_channel_info(self, channel_name):
         """Retourne les informations sur un canal spécifique"""
@@ -66,7 +80,9 @@ class MDFParser:
                 return None
                 
         try:
-            signal = self._mdf.get(channel_name)
+            # CORRECTION: Spécifier group=0, index=0 pour éviter les erreurs avec les canaux dupliqués
+            # Cela va toujours prendre la première occurrence du canal
+            signal = self._mdf.get(channel_name, group=0, index=0)
             return {
                 'name': channel_name,
                 'unit': signal.unit if hasattr(signal, 'unit') else '',
@@ -381,8 +397,9 @@ class MDFParser:
                 return [], [], [], []
         
         try:
-            # Obtenir le signal pour ce canal
-            signal = self._mdf.get(channel_name)
+            # CORRECTION: Obtenir le signal avec group=0, index=0
+            # Cela va toujours prendre la première occurrence du canal
+            signal = self._mdf.get(channel_name, group=0, index=0)
             
             # Déterminer le type de données
             if self._is_text_event(channel_name, signal):
@@ -457,7 +474,7 @@ class MDFParser:
             'errors': 0
         }
         
-        # Récupérer tous les canaux
+        # Récupérer tous les canaux (version améliorée qui filtre les canaux de temps)
         channels = self.get_channels()
         statistics['total_channels'] = len(channels)
         
