@@ -1,0 +1,220 @@
+{% extends 'robot_logs/base.html' %}
+{% load static %}
+
+{% block title %}Messages CAN pour l'ID {{ can_id }} | LogViewer{% endblock %}
+
+{% block head_extra %}
+<style>
+    .chart-container {
+        position: relative;
+        height: 400px;
+        width: 100%;
+    }
+    .can-message {
+        border-left: 4px solid #007bff;
+        margin-bottom: 10px;
+        padding:.5rem;
+        background-color: #f8f9fa;
+    }
+    .signal-value {
+        font-family: monospace;
+        padding: 2px 4px;
+        background-color: #e9ecef;
+        border-radius: 3px;
+    }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="container-fluid mt-4">
+    <div class="row">
+        <div class="col-12">
+            <nav aria-label="breadcrumb">
+                <ol class="breadcrumb">
+                    <li class="breadcrumb-item"><a href="{% url 'robot_logs:log_list' %}">Accueil</a></li>
+                    <li class="breadcrumb-item"><a href="{% url 'robot_logs:log_detail' log.id %}">Log #{{ log.id }}</a></li>
+                    <li class="breadcrumb-item"><a href="{% url 'robot_logs:can_view' log.id %}">Données CAN</a></li>
+                    <li class="breadcrumb-item active" aria-current="page">ID {{ can_id }}</li>
+                </ol>
+            </nav>
+            
+            <div class="d-flex justify-content-between align-items-center mb-2">
+                <h2>
+                    {% if message_name %}
+                        {{ message_name }} 
+                        <small class="text-muted">(<code>{{ can_id }}</code>)</small>
+                    {% else %}
+                        Messages CAN pour l'ID <code>{{ can_id }}</code>
+                    {% endif %}
+                </h2>
+                <a href="{% url 'robot_logs:can_view' log.id %}" class="btn btn-secondary">
+                    <i class="fas fa-arrow-left"></i> Retour à tous les messages
+                </a>
+            </div>
+            
+            <div class="card mb-4">
+                <div class="card-header bg-primary text-white d-flex justify-content-between align-items-center">
+                    <h5 class="card-title mb-0">Statistiques pour l'ID {{ can_id }}</h5>
+                    <span class="badge badge-light">{{ total_messages }} messages</span>
+                </div>
+                <div class="card-body">
+                    {% if signals_overview %}
+                        <h6>Signaux détectés</h6>
+                        <div class="table-responsive">
+                            <table class="table table-sm table-hover">
+                                <thead>
+                                    <tr>
+                                        <th>Signal</th>
+                                        <th>Occurrences</th>
+                                        <th>Min</th>
+                                        <th>Max</th>
+                                        <th>Unité</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    {% for signal in signals_overview %}
+                                        <tr>
+                                            <td>{{ signal.name }}</td>
+                                            <td>{{ signal.count }}</td>
+                                            <td>{{ signal.min }}</td>
+                                            <td>{{ signal.max }}</td>
+                                            <td>{{ signal.unit }}</td>
+                                        </tr>
+                                    {% endfor %}
+                                </tbody>
+                            </table>
+                        </div>
+                    {% endif %}
+                    
+                    {% if signal_chart_data %}
+                        <h6 class="mt-4">Évolution des valeurs des signaux</h6>
+                        <div class="chart-container">
+                            <canvas id="signalChart"></canvas>
+                        </div>
+                    {% endif %}
+                </div>
+            </div>
+            
+            <div class="card mb-4">
+                <div class="card-header bg-info text-white d-flex justify-content-between align-items-center">
+                    <h5 class="card-title mb-0">Messages (ID: {{ can_id }})</h5>
+                    
+                    <div>
+                        <a href="{% url 'robot_logs:can_export' log.id %}?can_id={{ can_id }}" class="btn btn-sm btn-light">
+                            <i class="fas fa-file-csv"></i> Exporter
+                        </a>
+                    </div>
+                </div>
+                <div class="card-body">
+                    {% if limited_display %}
+                        <div class="alert alert-warning">
+                            <i class="fas fa-exclamation-triangle"></i>
+                            Affichage limité aux {{ display_limit }} premiers messages sur un total de {{ total_messages }}.
+                        </div>
+                    {% endif %}
+                    
+                    {% if can_messages %}
+                        <div>
+                            {% for message in can_messages %}
+                                <div class="can-message">
+                                    <div class="d-flex justify-content-between">
+                                        <div>
+                                            <strong>{{ message.timestamp|date:"d/m/Y H:i:s.u" }}</strong>
+                                        </div>
+                                    </div>
+                                    <div class="mt-1">
+                                        <small>Données: <code>{{ message.raw_data }}</code></small>
+                                    </div>
+                                    {% if message.signals.exists %}
+                                        <div class="mt-2">
+                                            <small><strong>Signaux décodés:</strong></small>
+                                            <div class="ml-3">
+                                                {% for signal in message.signals.all %}
+                                                    <div>
+                                                        <small>{{ signal.name }}: <span class="signal-value">{{ signal.value }}</span>
+                                                        {% if signal.unit %}{{ signal.unit }}{% endif %}</small>
+                                                    </div>
+                                                {% endfor %}
+                                            </div>
+                                        </div>
+                                    {% endif %}
+                                    <div class="mt-2 text-right">
+                                        <a href="{% url 'robot_logs:can_message_detail' message.id %}" class="btn btn-sm btn-outline-info">
+                                            <i class="fas fa-info-circle"></i> Détails
+                                        </a>
+                                    </div>
+                                </div>
+                            {% endfor %}
+                        </div>
+                    {% else %}
+                        <div class="alert alert-info">
+                            Aucun message CAN trouvé pour l'ID {{ can_id }}.
+                        </div>
+                    {% endif %}
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+{% if signal_chart_data %}
+<script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/chartjs-adapter-date-fns"></script>
+<script>
+    document.addEventListener('DOMContentLoaded', function() {
+        var ctx = document.getElementById('signalChart').getContext('2d');
+        var chartData = {{ signal_chart_data|safe }};
+        
+        // Générer une couleur aléatoire pour chaque dataset
+        chartData.datasets.forEach(function(dataset, index) {
+            var hue = index * 137.5 % 360;  // Distribution espacée des couleurs
+            dataset.borderColor = `hsl(${hue}, 75%, 50%)`;
+            dataset.backgroundColor = `hsl(${hue}, 75%, 85%)`;
+        });
+        
+        var signalChart = new Chart(ctx, {
+            type: 'line',
+            data: chartData,
+            options: {
+                responsive: true,
+                maintainAspectRatio: false,
+                scales: {
+                    x: {
+                        type: 'time',
+                        time: {
+                            displayFormats: {
+                                millisecond: 'HH:mm:ss.SSS',
+                                second: 'HH:mm:ss',
+                                minute: 'HH:mm',
+                                hour: 'HH:mm'
+                            }
+                        },
+                        title: {
+                            display: true,
+                            text: 'Heure'
+                        }
+                    },
+                    y: {
+                        title: {
+                            display: true,
+                            text: 'Valeur'
+                        }
+                    }
+                },
+                plugins: {
+                    legend: {
+                        position: 'top',
+                    },
+                    title: {
+                        display: true,
+                        text: 'Évolution des valeurs des signaux pour l\'ID ' + '{{ can_id }}'
+                    }
+                }
+            }
+        });
+    });
+</script>
+{% endif %}
+{% endblock %}
