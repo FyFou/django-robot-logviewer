@@ -15,6 +15,22 @@ from ..models import RobotLog, CurveMeasurement, Laser2DScan, ImageData
 
 logger = logging.getLogger(__name__)
 
+# Instance globale de l'interpréteur DBC
+dbc_interpreter = None
+
+def get_dbc_interpreter():
+    """Récupère ou crée l'instance de l'interpréteur DBC"""
+    global dbc_interpreter
+    
+    if dbc_interpreter is None:
+        # Import dynamique pour éviter les dépendances circulaires
+        from .dbc_interpreter import DBCInterpreter, CANTOOLS_AVAILABLE
+        
+        if CANTOOLS_AVAILABLE:
+            dbc_interpreter = DBCInterpreter()
+        
+    return dbc_interpreter
+
 def is_text_event(channel_name, data):
     """Détermine si un canal contient des événements textuels"""
     # Vérification par le nom du canal
@@ -338,68 +354,6 @@ def process_image_data(channel_name, data, timestamps, unit='', description=''):
         
         return main_log, None
 
-def process_can_data(channel_name, data, timestamps, unit='', description=''):
-    """Traite un canal comme des trames CAN"""
-    # Créer un log principal pour ces données CAN
-    main_log = RobotLog(
-        timestamp=datetime.fromtimestamp(timestamps[0]),
-        robot_id="MDF_Import",
-        level="INFO",
-        message=f"Données CAN pour {channel_name}",
-        source="MDF Import",
-        log_type="TEXT"  # Utilisez TEXT par défaut ou ajoutez un nouveau type CAN dans le modèle
-    )
-    
-    # Traiter et formatter les données CAN en un format lisible
-    can_logs = []
-    
-    # Convertir les timestamps en datetime
-    timestamps_dt = [datetime.fromtimestamp(ts) for ts in timestamps]
-    
-    # Analysons les 5 premières trames CAN pour déterminer la structure
-    for i, (ts, frame) in enumerate(zip(timestamps_dt[:min(5, len(timestamps_dt))], data[:min(5, len(data))])):
-        try:
-            # Essayer différentes méthodes pour extraire les informations de la trame CAN
-            frame_data = extract_can_frame_data(frame)
-            
-            # Créer un log pour chaque trame CAN
-            log = RobotLog(
-                timestamp=ts,
-                robot_id="MDF_Import",
-                level="INFO",
-                message=f"CAN Frame: {frame_data}",
-                source=f"CAN Import: {channel_name}",
-                log_type="TEXT"
-            )
-            
-            # Stocker les détails dans les métadonnées
-            metadata = {
-                'channel_name': channel_name,
-                'can_frame': frame_data,
-                'sample_index': i,
-            }
-            log.set_metadata_from_dict(metadata)
-            can_logs.append(log)
-        except Exception as e:
-            logger.warning(f"Impossible d'interpréter la trame CAN: {e}")
-    
-    # Ajouter des métadonnées au log principal
-    metadata = {
-        'channel_name': channel_name,
-        'frames_count': len(data),
-        'unit': unit,
-        'description': description,
-        'start_time': timestamps[0],
-        'end_time': timestamps[-1],
-        'duration': timestamps[-1] - timestamps[0],
-    }
-    main_log.set_metadata_from_dict(metadata)
-    
-    # Ajouter le log principal à la liste des logs
-    can_logs.insert(0, main_log)
-    
-    return can_logs, [], [], []
-
 def extract_can_frame_data(frame):
     """Extrait les informations d'une trame CAN"""
     # Plusieurs formats possibles pour les trames CAN, essayons de les détecter
@@ -443,6 +397,149 @@ def extract_can_frame_data(frame):
     
     # Si tout échoue, convertir en chaîne de caractères
     return str(frame)
+
+def process_can_data(channel_name, data, timestamps, unit='', description='', dbc_file=None, can_mapping=None):
+    """
+    Traite un canal comme des trames CAN, en utilisant un fichier DBC si disponible
+    
+    Args:
+        channel_name: Nom du canal CAN
+        data: Données du canal (trames CAN)
+        timestamps: Timestamps des données
+        unit: Unité des données
+        description: Description du canal
+        dbc_file: Instance du modèle DBCFile ou ID de la base DBC
+        can_mapping: Instance du modèle CANMapping
+    
+    Returns:
+        Tuple contenant (logs, curve_measurements, laser_scans, images)
+    """
+    # Créer un log principal pour ces données CAN
+    main_log = RobotLog(
+        timestamp=datetime.fromtimestamp(timestamps[0]),
+        robot_id="MDF_Import",
+        level="INFO",
+        message=f"Données CAN pour {channel_name}",
+        source="MDF Import",
+        log_type="TEXT"
+    )
+    
+    # Traiter et formatter les données CAN en un format lisible
+    can_logs = []
+    
+    # Convertir les timestamps en datetime
+    timestamps_dt = [datetime.fromtimestamp(ts) for ts in timestamps]
+    
+    # Obtenir l'interpréteur DBC et charger le fichier DBC si disponible
+    dbc_id = None
+    dbc_decoder = get_dbc_interpreter()
+    
+    if dbc_file and dbc_decoder:
+        # Si c'est un objet DBCFile, récupérer le chemin du fichier
+        if hasattr(dbc_file, 'file'):
+            dbc_path = dbc_file.file.path
+            dbc_id = dbc_file.id
+        # Sinon, considérer que c'est un chemin ou un ID
+        else:
+            dbc_path = dbc_file
+            dbc_id = dbc_file
+        
+        # Charger le fichier DBC s'il n'est pas déjà chargé
+        if dbc_id not in dbc_decoder.dbc_databases:
+            dbc_decoder.load_dbc_file(dbc_path, dbc_id)
+    
+    # Nombre maximum de trames à traiter individuellement (pour éviter de générer trop de logs)
+    max_frames_to_process = 100
+    total_frames = len(data)
+    frames_to_process = min(total_frames, max_frames_to_process)
+    
+    # Analyser les trames CAN
+    for i, (ts, frame) in enumerate(zip(timestamps_dt[:frames_to_process], data[:frames_to_process])):
+        try:
+            # Essayer différentes méthodes pour extraire les informations de la trame CAN
+            frame_info = extract_can_frame_data(frame)
+            
+            # Si DBC disponible, essayer de décoder la trame
+            decoded_msg = None
+            if dbc_decoder and dbc_id and isinstance(frame_info, dict) and 'ID' in frame_info:
+                try:
+                    # Décoder la trame avec le fichier DBC
+                    decoded = dbc_decoder.decode_frame(dbc_id, frame_info['ID'], frame_info.get('Data', ''))
+                    
+                    if decoded:
+                        # Formater le message décodé
+                        signal_parts = []
+                        for signal_name, signal_value in decoded['signals'].items():
+                            signal_parts.append(f"{signal_name}={signal_value}")
+                        
+                        decoded_msg = f"{decoded['message_name']}: " + ", ".join(signal_parts)
+                except Exception as e:
+                    logger.debug(f"Erreur lors du décodage de la trame CAN: {e}")
+            
+            # Message à afficher
+            message = f"CAN Frame: {frame_info}"
+            if decoded_msg:
+                message = f"CAN Decoded: {decoded_msg}"
+            
+            # Créer un log pour cette trame CAN
+            log = RobotLog(
+                timestamp=ts,
+                robot_id="MDF_Import",
+                level="INFO",
+                message=message,
+                source=f"CAN Import: {channel_name}",
+                log_type="TEXT"
+            )
+            
+            # Ajouter des métadonnées
+            metadata = {
+                'channel_name': channel_name,
+                'can_frame': frame_info,
+                'sample_index': i,
+            }
+            
+            # Ajouter les infos décodées si disponibles
+            if decoded_msg:
+                metadata['can_decoded'] = decoded_msg
+            
+            log.set_metadata_from_dict(metadata)
+            can_logs.append(log)
+        except Exception as e:
+            logger.warning(f"Impossible d'interpréter la trame CAN: {e}")
+    
+    # Si beaucoup de trames, ajouter un message de résumé
+    if total_frames > max_frames_to_process:
+        summary_log = RobotLog(
+            timestamp=datetime.fromtimestamp(timestamps[max_frames_to_process]),
+            robot_id="MDF_Import",
+            level="INFO",
+            message=f"... {total_frames - max_frames_to_process} trames CAN supplémentaires non affichées",
+            source=f"CAN Import: {channel_name}",
+            log_type="TEXT"
+        )
+        can_logs.append(summary_log)
+    
+    # Ajouter des métadonnées au log principal
+    metadata = {
+        'channel_name': channel_name,
+        'frames_count': len(data),
+        'unit': unit,
+        'description': description,
+        'start_time': timestamps[0],
+        'end_time': timestamps[-1],
+        'duration': timestamps[-1] - timestamps[0],
+    }
+    
+    # Ajouter des informations sur le décodage DBC
+    if dbc_id:
+        metadata['dbc_file_id'] = dbc_id
+    
+    main_log.set_metadata_from_dict(metadata)
+    
+    # Ajouter le log principal à la liste des logs
+    can_logs.insert(0, main_log)
+    
+    return can_logs, [], [], []
 
 def sanitize_filename(filename):
     """Remplace les caractères potentiellement problématiques dans les noms de fichiers"""
