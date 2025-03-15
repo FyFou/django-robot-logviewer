@@ -1,58 +1,64 @@
 from django import forms
-from .models import MDFFile
+from .models import MDFFile, DBCFile, CANMapping
 
 class MDFImportForm(forms.ModelForm):
     """Formulaire pour importer un fichier MDF"""
-    
     preview_first = forms.BooleanField(
-        label="Prévisualiser d'abord",
-        help_text="Voir le contenu du fichier avant l'importation",
-        required=False,
-        initial=True
+        required=False, 
+        initial=True,
+        label="Prévisualiser le contenu avant importation",
+        help_text="Affiche un aperçu des canaux contenus dans le fichier MDF avant de les importer"
     )
     
     class Meta:
         model = MDFFile
-        fields = ['file', 'name']
-        widgets = {
-            'name': forms.TextInput(attrs={'class': 'form-control'}),
-            'file': forms.FileInput(attrs={'class': 'form-control'}),
+        fields = ['file', 'name', 'preview_first']
+        labels = {
+            'file': 'Fichier MDF',
+            'name': 'Nom'
         }
-        
+        help_texts = {
+            'file': 'Sélectionnez un fichier MDF à importer (.mdf, .mf4)',
+            'name': 'Nom descriptif pour ce fichier'
+        }
+
+class DBCImportForm(forms.ModelForm):
+    """Formulaire pour importer un fichier DBC"""
+    class Meta:
+        model = DBCFile
+        fields = ['file', 'name', 'description']
+        labels = {
+            'file': 'Fichier DBC',
+            'name': 'Nom',
+            'description': 'Description'
+        }
+        help_texts = {
+            'file': 'Sélectionnez un fichier DBC (Database CAN) à importer (.dbc)',
+            'name': 'Nom descriptif pour ce fichier',
+            'description': 'Description optionnelle (e.g. version du véhicule, ECU, etc.)'
+        }
+
+class CANMappingForm(forms.ModelForm):
+    """Formulaire pour associer un canal CAN à un fichier DBC"""
+    class Meta:
+        model = CANMapping
+        fields = ['mdf_file', 'channel_name', 'dbc_file']
+        labels = {
+            'mdf_file': 'Fichier MDF',
+            'channel_name': 'Nom du canal CAN',
+            'dbc_file': 'Fichier DBC'
+        }
+        help_texts = {
+            'mdf_file': 'Fichier MDF contenant le canal CAN',
+            'channel_name': 'Nom du canal CAN dans le fichier MDF',
+            'dbc_file': 'Fichier DBC à utiliser pour décoder ce canal'
+        }
+    
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
-        self.fields['name'].help_text = "Nom descriptif pour ce fichier MDF"
-        self.fields['file'].help_text = "Fichier MDF (format Vector MDF3 ou MDF4)"
         
-    def clean_file(self):
-        """Valide le fichier MDF"""
-        file = self.cleaned_data.get('file')
-        
-        # Vérifier que le fichier existe
-        if not file:
-            raise forms.ValidationError("Aucun fichier n'a été sélectionné.")
-        
-        # Vérifier la taille du fichier
-        if file.size == 0:
-            raise forms.ValidationError("Le fichier soumis est vide.")
-            
-        # Afficher des informations de débogage sur le fichier
-        print(f"Fichier soumis: {file.name}, taille: {file.size} octets")
-        
-        # Vérifier l'extension
-        if file and not (file.name.lower().endswith('.mdf') or file.name.lower().endswith('.mf4')):
-            raise forms.ValidationError("Le fichier doit être au format MDF (.mdf ou .mf4)")
-        
-        return file
-        
-    def clean(self):
-        """Valide le formulaire complet"""
-        cleaned_data = super().clean()
-        
-        # Si aucun nom n'est fourni, utiliser le nom du fichier
-        if 'file' in cleaned_data and not cleaned_data.get('name'):
-            file = cleaned_data['file']
-            cleaned_data['name'] = file.name
-            self.cleaned_data['name'] = file.name
-            
-        return cleaned_data
+        # Si un fichier MDF est déjà sélectionné, filtrer les canaux disponibles
+        if 'mdf_file' in self.initial:
+            mdf_file = self.initial['mdf_file']
+            # Ici, on pourrait ajouter une logique pour ajouter des choix pour channel_name
+            # basés sur les canaux CAN détectés dans le fichier MDF
