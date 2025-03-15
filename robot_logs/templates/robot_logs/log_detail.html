@@ -1,0 +1,42 @@
+{% extends 'robot_logs/base.html' %}
+
+{% block title %}Détail du log - LogViewer{% endblock %}
+
+{% block content %}
+    <div class="d-flex justify-content-between align-items-center mb-3">
+        <h1>Détail du log</h1>
+        <a href="{% url 'robot_logs:log_list' %}" class="btn btn-primary">Retour à la liste</a>
+    </div>
+    
+    <div class="card">
+        <div class="card-header">
+            <div class="row">
+                <div class="col-md-6">
+                    <strong>Date/Heure:</strong> {{ log.timestamp|date:"Y-m-d H:i:s" }}
+                </div>
+                <div class="col-md-6">
+                    <strong>Robot ID:</strong> {{ log.robot_id }}
+                </div>
+            </div>
+        </div>
+        <div class="card-body">
+            <div class="row mb-3">
+                <div class="col-md-6">
+                    <strong>Niveau:</strong> 
+                    <span class="badge bg-{% if log.level == 'DEBUG' %}secondary{% elif log.level == 'INFO' %}primary{% elif log.level == 'WARNING' %}warning{% elif log.level == 'ERROR' %}danger{% elif log.level == 'CRITICAL' %}danger{% endif %}">
+                        {{ log.level }}
+                    </span>
+                </div>
+                <div class="col-md-6">
+                    <strong>Source:</strong> {{ log.source }}
+                </div>
+            </div>
+            <div class="row">
+                <div class="col-12">
+                    <strong>Message:</strong>
+                    <pre class="mt-2 p-3 bg-light">{{ log.message }}</pre>
+                </div>
+            </div>
+        </div>
+    </div>
+{% endblock %}
