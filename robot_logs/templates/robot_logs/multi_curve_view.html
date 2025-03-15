@@ -1,0 +1,287 @@
+{% extends 'robot_logs/base.html' %}
+{% load static %}
+
+{% block title %}Comparaison de courbes | LogViewer{% endblock %}
+
+{% block head_extra %}
+<script src="https://cdn.plot.ly/plotly-latest.min.js"></script>
+<style>
+    #curveChart {
+        width: 100%;
+        height: 600px;
+    }
+    .curve-selector {
+        margin-bottom: 20px;
+    }
+    .axis-selection {
+        width: 80px;
+    }
+    .color-dot {
+        display: inline-block;
+        width: 20px;
+        height: 20px;
+        border-radius: 50%;
+        margin-right: 5px;
+        vertical-align: middle;
+    }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="container-fluid mt-4">
+    <nav aria-label="breadcrumb">
+        <ol class="breadcrumb">
+            <li class="breadcrumb-item"><a href="{% url 'robot_logs:log_list' %}">Accueil</a></li>
+            <li class="breadcrumb-item active" aria-current="page">Comparaison de courbes</li>
+        </ol>
+    </nav>
+    
+    <div class="d-flex justify-content-between align-items-center mb-2">
+        <h2>Comparaison de courbes</h2>
+    </div>
+    
+    <div class="card mb-4">
+        <div class="card-header bg-primary text-white">
+            <h5 class="card-title mb-0">Sélection des courbes</h5>
+        </div>
+        <div class="card-body curve-selector">
+            <form method="get" class="row g-3" id="curveForm">
+                <div class="col-md-9">
+                    <select name="curve_select" class="form-select" id="curveSelect">
+                        <option value="">Sélectionner une courbe...</option>
+                        {% for curve in available_curves %}
+                            <option value="{{ curve.id }}">{{ curve.message }} ({{ curve.timestamp }})</option>
+                        {% endfor %}
+                    </select>
+                </div>
+                <div class="col-md-2">
+                    <select id="axisSelect" class="form-select axis-selection">
+                        <option value="1">Axe Y1</option>
+                        <option value="2">Axe Y2</option>
+                        <option value="3">Axe Y3</option>
+                        <option value="4">Axe Y4</option>
+                    </select>
+                </div>
+                <div class="col-md-1">
+                    <button type="button" id="addCurveBtn" class="btn btn-primary">
+                        <i class="bi bi-plus"></i> Ajouter
+                    </button>
+                </div>
+                
+                <!-- Champs cachés pour les configurations de courbes -->
+                {% for config in request.GET.getlist 'curve_config' %}
+                    <input type="hidden" name="curve_config" value="{{ config }}">
+                {% endfor %}
+            </form>
+            
+            {% if selected_logs %}
+                <div class="mt-3">
+                    <h6>Courbes sélectionnées :</h6>
+                    <div class="table-responsive">
+                        <table class="table table-sm">
+                            <thead>
+                                <tr>
+                                    <th>Courbe</th>
+                                    <th>Capteur</th>
+                                    <th>Axe</th>
+                                    <th>Actions</th>
+                                </tr>
+                            </thead>
+                            <tbody id="selectedCurvesList">
+                                {% for curve in selected_logs %}
+                                    {% for config in request.GET.getlist 'curve_config' %}
+                                        {% if config.startswith|stringformat:"s"|add:":" in config %}
+                                            {% with axis_id=config|cut:curve.id|cut:":" %}
+                                                <tr data-config="{{ curve.id }}:{{ axis_id }}">
+                                                    <td>
+                                                        <div class="color-dot" style="background-color: 
+                                                            {% if axis_id == '1' %}#1f77b4{% endif %}
+                                                            {% if axis_id == '2' %}#ff7f0e{% endif %}
+                                                            {% if axis_id == '3' %}#2ca02c{% endif %}
+                                                            {% if axis_id == '4' %}#d62728{% endif %}
+                                                        "></div>
+                                                        {{ curve.message }}
+                                                    </td>
+                                                    <td>{{ curve.curve_measurements.first.sensor_name }}</td>
+                                                    <td>Y{{ axis_id }}</td>
+                                                    <td>
+                                                        <button type="button" class="btn btn-sm btn-danger remove-curve-btn" data-config="{{ curve.id }}:{{ axis_id }}">
+                                                            <i class="bi bi-x"></i> Retirer
+                                                        </button>
+                                                    </td>
+                                                </tr>
+                                            {% endwith %}
+                                        {% endif %}
+                                    {% endfor %}
+                                {% endfor %}
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+            {% endif %}
+        </div>
+    </div>
+    
+    <div class="card">
+        <div class="card-header bg-info text-white">
+            <h5 class="card-title mb-0">Graphique</h5>
+        </div>
+        <div class="card-body">
+            {% if curves_data != "[]" %}
+                <div id="curveChart"></div>
+            {% else %}
+                <div class="alert alert-info">
+                    <p>Aucune courbe sélectionnée. Utilisez le formulaire ci-dessus pour ajouter des courbes au graphique.</p>
+                </div>
+            {% endif %}
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+    document.addEventListener('DOMContentLoaded', function() {
+        var curvesData = {{ curves_data|safe }};
+        
+        if (curvesData.length > 0) {
+            var plotData = [];
+            
+            // Définir des couleurs pour chaque axe Y
+            var axisColors = {
+                'y1': '#1f77b4',  // bleu
+                'y2': '#ff7f0e',  // orange
+                'y3': '#2ca02c',  // vert
+                'y4': '#d62728'   // rouge
+            };
+            
+            // Créer un layout avec les axes Y multiples
+            var layout = {
+                title: 'Comparaison de courbes',
+                xaxis: {
+                    title: 'Temps',
+                    type: 'date'
+                },
+                yaxis: {
+                    title: 'Axe Y1',
+                    titlefont: { color: axisColors['y1'] },
+                    tickfont: { color: axisColors['y1'] },
+                    side: 'left'
+                },
+                showlegend: true,
+                legend: {
+                    x: 0,
+                    y: 1
+                },
+                grid: { rows: 1, columns: 1, pattern: 'independent' }
+            };
+            
+            // Ajouter les axes Y supplémentaires si nécessaire
+            var usedAxes = {};
+            
+            for (var i = 0; i < curvesData.length; i++) {
+                var curve = curvesData[i];
+                var yaxis = curve.yaxis || 'y1';
+                
+                // Marquer cet axe comme utilisé
+                usedAxes[yaxis] = true;
+                
+                // Ajouter la courbe avec son axe Y correspondant
+                var trace = {
+                    x: curve.timestamps.map(function(ts) { return new Date(ts); }),
+                    y: curve.values,
+                    type: 'scatter',
+                    mode: 'lines',
+                    name: curve.name,
+                    yaxis: yaxis,
+                    line: { color: axisColors[yaxis] }
+                };
+                
+                plotData.push(trace);
+            }
+            
+            // Définir les axes Y supplémentaires
+            if (usedAxes['y2']) {
+                layout.yaxis2 = {
+                    title: 'Axe Y2',
+                    titlefont: { color: axisColors['y2'] },
+                    tickfont: { color: axisColors['y2'] },
+                    anchor: 'x',
+                    overlaying: 'y',
+                    side: 'right'
+                };
+            }
+            
+            if (usedAxes['y3']) {
+                layout.yaxis3 = {
+                    title: 'Axe Y3',
+                    titlefont: { color: axisColors['y3'] },
+                    tickfont: { color: axisColors['y3'] },
+                    anchor: 'free',
+                    overlaying: 'y',
+                    side: 'right',
+                    position: 0.85
+                };
+            }
+            
+            if (usedAxes['y4']) {
+                layout.yaxis4 = {
+                    title: 'Axe Y4',
+                    titlefont: { color: axisColors['y4'] },
+                    tickfont: { color: axisColors['y4'] },
+                    anchor: 'free',
+                    overlaying: 'y',
+                    side: 'right',
+                    position: 0.95
+                };
+            }
+            
+            var config = {
+                responsive: true,
+                scrollZoom: true,
+                modeBarButtonsToAdd: ['drawline', 'eraseshape'],
+                modeBarButtonsToRemove: ['lasso2d']
+            };
+            
+            Plotly.newPlot('curveChart', plotData, layout, config);
+        }
+        
+        // Gestion de l'ajout de courbes
+        document.getElementById('addCurveBtn').addEventListener('click', function() {
+            var curveSelect = document.getElementById('curveSelect');
+            var axisSelect = document.getElementById('axisSelect');
+            
+            if (curveSelect.value) {
+                var curveId = curveSelect.value;
+                var axisId = axisSelect.value;
+                var config = curveId + ':' + axisId;
+                
+                // Ajouter un champ caché pour cette configuration
+                var input = document.createElement('input');
+                input.type = 'hidden';
+                input.name = 'curve_config';
+                input.value = config;
+                
+                document.getElementById('curveForm').appendChild(input);
+                document.getElementById('curveForm').submit();
+            }
+        });
+        
+        // Gestion de la suppression de courbes
+        document.querySelectorAll('.remove-curve-btn').forEach(function(btn) {
+            btn.addEventListener('click', function() {
+                var config = this.dataset.config;
+                
+                // Supprimer cette configuration du formulaire
+                document.querySelectorAll('input[name="curve_config"]').forEach(function(input) {
+                    if (input.value === config) {
+                        input.remove();
+                    }
+                });
+                
+                document.getElementById('curveForm').submit();
+            });
+        });
+    });
+</script>
+{% endblock %}
