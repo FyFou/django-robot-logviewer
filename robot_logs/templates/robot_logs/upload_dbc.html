@@ -1,0 +1,85 @@
+{% extends 'robot_logs/base.html' %}
+{% load static %}
+
+{% block title %}Télécharger un fichier DBC | LogViewer{% endblock %}
+
+{% block content %}
+<div class="container-fluid mt-4">
+    <div class="row">
+        <div class="col-md-8 offset-md-2">
+            <div class="card">
+                <div class="card-header bg-primary text-white">
+                    <h5 class="card-title mb-0">Télécharger un fichier DBC</h5>
+                </div>
+                <div class="card-body">
+                    <form method="post" enctype="multipart/form-data">
+                        {% csrf_token %}
+                        
+                        {% if form.non_field_errors %}
+                            <div class="alert alert-danger">
+                                {% for error in form.non_field_errors %}
+                                    <p>{{ error }}</p>
+                                {% endfor %}
+                            </div>
+                        {% endif %}
+                        
+                        <div class="form-group">
+                            <label for="{{ form.file.id_for_label }}">Fichier DBC</label>
+                            {{ form.file }}
+                            {% if form.file.errors %}
+                                <div class="text-danger">
+                                    {{ form.file.errors }}
+                                </div>
+                            {% endif %}
+                            {% if form.file.help_text %}
+                                <small class="form-text text-muted">{{ form.file.help_text }}</small>
+                            {% endif %}
+                        </div>
+                        
+                        <div class="form-group">
+                            <label for="{{ form.name.id_for_label }}">Nom</label>
+                            {{ form.name }}
+                            {% if form.name.errors %}
+                                <div class="text-danger">
+                                    {{ form.name.errors }}
+                                </div>
+                            {% endif %}
+                            {% if form.name.help_text %}
+                                <small class="form-text text-muted">{{ form.name.help_text }}</small>
+                            {% endif %}
+                        </div>
+                        
+                        <div class="form-group">
+                            <label for="{{ form.description.id_for_label }}">Description</label>
+                            {{ form.description }}
+                            {% if form.description.errors %}
+                                <div class="text-danger">
+                                    {{ form.description.errors }}
+                                </div>
+                            {% endif %}
+                            {% if form.description.help_text %}
+                                <small class="form-text text-muted">{{ form.description.help_text }}</small>
+                            {% endif %}
+                        </div>
+                        
+                        <div class="alert alert-info">
+                            <h6><i class="fas fa-info-circle"></i> À propos des fichiers DBC</h6>
+                            <p>Les fichiers DBC (Database CAN) sont utilisés pour décoder les messages CAN et les transformer en signaux compréhensibles.</p>
+                            <p>En téléchargeant un fichier DBC, vous pourrez visualiser les données CAN de vos fichiers MDF avec les noms des signaux et leurs valeurs.</p>
+                        </div>
+                        
+                        <div class="form-group">
+                            <button type="submit" class="btn btn-primary">
+                                <i class="fas fa-upload"></i> Télécharger
+                            </button>
+                            <a href="{% url 'robot_logs:dbc_file_list' %}" class="btn btn-secondary">
+                                <i class="fas fa-times"></i> Annuler
+                            </a>
+                        </div>
+                    </form>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}
