@@ -1,0 +1,126 @@
+{% extends 'robot_logs/base.html' %}
+
+{% block title %}Données de courbe - LogViewer{% endblock %}
+
+{% block content %}
+<div class="d-flex justify-content-between align-items-center mb-3">
+    <h1>Données de courbe</h1>
+    <a href="{% url 'robot_logs:log_detail' log.id %}" class="btn btn-primary">Retour au détail</a>
+</div>
+
+<div class="card mb-4">
+    <div class="card-header">
+        <div class="row">
+            <div class="col-md-6">
+                <strong>Date/Heure:</strong> {{ log.timestamp|date:"Y-m-d H:i:s" }}
+            </div>
+            <div class="col-md-6">
+                <strong>Robot ID:</strong> {{ log.robot_id }}
+            </div>
+        </div>
+    </div>
+    <div class="card-body">
+        <h5>{{ log.message }}</h5>
+        <p><strong>Source:</strong> {{ log.source }}</p>
+        
+        {% if metadata %}
+        <div class="mb-3">
+            <strong>Informations sur la courbe:</strong>
+            <ul>
+                <li><strong>Nom du capteur:</strong> {{ metadata.channel_name|default:"Non spécifié" }}</li>
+                <li><strong>Unité:</strong> {{ metadata.unit|default:"Non spécifiée" }}</li>
+                <li><strong>Nombre d'échantillons:</strong> {{ metadata.samples_count|default:"0" }}</li>
+                <li><strong>Durée:</strong> {{ metadata.duration|default:"0" }} secondes</li>
+            </ul>
+        </div>
+        {% endif %}
+        
+        <div class="chart-container" style="position: relative; height:400px; width:100%">
+            <canvas id="curveChart"></canvas>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/luxon@3.4.0/build/global/luxon.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/chartjs-adapter-luxon@1.3.1/dist/chartjs-adapter-luxon.min.js"></script>
+<script>
+    const chartData = {{ chart_data|safe }};
+    
+    // Convertir les données pour Chart.js
+    const data = [];
+    for (let i = 0; i < chartData.timestamps.length; i++) {
+        data.push({
+            x: chartData.timestamps[i],
+            y: chartData.values[i]
+        });
+    }
+    
+    // Configuration du graphique
+    const ctx = document.getElementById('curveChart').getContext('2d');
+    const myChart = new Chart(ctx, {
+        type: 'line',
+        data: {
+            datasets: [{
+                label: chartData.sensor_name || 'Mesures',
+                data: data,
+                borderColor: 'rgb(75, 192, 192)',
+                backgroundColor: 'rgba(75, 192, 192, 0.2)',
+                borderWidth: 1,
+                tension: 0.1,
+                pointRadius: 0,
+                pointHitRadius: 5
+            }]
+        },
+        options: {
+            responsive: true,
+            maintainAspectRatio: false,
+            interaction: {
+                mode: 'index',
+                intersect: false
+            },
+            scales: {
+                x: {
+                    type: 'time',
+                    time: {
+                        unit: 'second',
+                        tooltipFormat: 'yyyy-MM-dd HH:mm:ss.SSS'
+                    },
+                    title: {
+                        display: true,
+                        text: 'Temps'
+                    }
+                },
+                y: {
+                    title: {
+                        display: true,
+                        text: '{{ metadata.unit|default:"Valeur" }}'
+                    }
+                }
+            },
+            plugins: {
+                tooltip: {
+                    callbacks: {
+                        label: function(context) {
+                            return `${context.dataset.label}: ${context.parsed.y}`;
+                        }
+                    }
+                },
+                zoom: {
+                    zoom: {
+                        wheel: {
+                            enabled: true,
+                        },
+                        pinch: {
+                            enabled: true
+                        },
+                        mode: 'xy'
+                    }
+                }
+            }
+        }
+    });
+</script>
+{% endblock %}
