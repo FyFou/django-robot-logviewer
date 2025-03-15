@@ -80,57 +80,69 @@ urlpatterns = [
    pip install asammdf==5.21.0
    ```
 
-2. Ou utiliser ce script plus simple qui contourne les problèmes d'API :
-   ```python
-   import numpy as np
-   from asammdf import MDF
-   from asammdf.blocks.mdf_v4 import Signal
-
-   # Créer un fichier MDF simple
-   mdf = MDF()
-
-   # Ajouter un signal simple
-   timestamps = np.linspace(0, 10, 100)
-   signal = np.sin(timestamps)
-
-   # Créer un Signal et l'ajouter
-   s = Signal(
-       samples=signal,
-       timestamps=timestamps,
-       name='sinus'
-   )
-   mdf.append([s])
-
-   # Sauvegarder
-   mdf.save('test_simple.mdf', overwrite=True)
-   print("Fichier MDF simple créé")
+2. Utiliser le script `simple_mdf_generator.py` qui est plus robuste face aux différentes versions :
+   ```bash
+   python scripts/simple_mdf_generator.py
    ```
 
-### L'importation de fichiers MDF échoue
+### Erreur "Le fichier soumis est vide" lors de l'importation MDF
 
-**Problème**: Vous ne pouvez pas importer de fichiers MDF depuis l'interface web.
+**Problème**: Lors de l'importation d'un fichier MDF via l'interface web, vous obtenez l'erreur "Le fichier soumis est vide" même si le fichier existe et n'est pas vide.
 
 **Causes possibles**:
-1. La bibliothèque asammdf n'est pas correctement installée
-2. Les permissions de fichier sont incorrectes
-3. Le format MDF du fichier n'est pas compatible
+1. Le fichier MDF généré a réellement une taille de 0 octet
+2. Django ne détecte pas correctement le fichier téléchargé
+3. Problèmes de permissions de fichier
+4. Problèmes de configuration Django
 
 **Solutions**:
-1. Vérifier l'installation d'asammdf :
+
+1. Vérifier la taille réelle du fichier MDF :
    ```bash
-   pip install asammdf --upgrade
+   # Sur Windows
+   dir test_mdf_file.mdf
+   # Sur Linux/Mac
+   ls -l test_mdf_file.mdf
    ```
 
-2. Vérifier que le dossier `media` existe et a les bonnes permissions :
+2. Utiliser le script `test_mdf_import.py` pour contourner l'interface web :
+   ```bash
+   python scripts/test_mdf_import.py test_mdf_file.mdf
+   ```
+
+3. Vérifier que les dossiers médias existent et ont les bonnes permissions :
    ```bash
    mkdir -p media/log_data media/log_images media/mdf_files
    chmod -R 755 media  # Sur Linux/Mac
    ```
 
-3. Essayer avec un fichier MDF simple généré par le script fourni :
-   ```bash
-   python scripts/generate_test_mdf.py
+4. Mettre à jour les paramètres Django (`settings.py`) avec les lignes suivantes :
+   ```python
+   # Media files
+   MEDIA_URL = '/media/'
+   MEDIA_ROOT = os.path.join(BASE_DIR, 'media')
+
+   # Ensure media directories exist
+   os.makedirs(os.path.join(MEDIA_ROOT, 'log_data'), exist_ok=True)
+   os.makedirs(os.path.join(MEDIA_ROOT, 'log_images'), exist_ok=True)
+   os.makedirs(os.path.join(MEDIA_ROOT, 'mdf_files'), exist_ok=True)
    ```
+
+5. Configurer les URLs pour servir les fichiers médias (`logViewer/urls.py`) :
+   ```python
+   from django.conf import settings
+   from django.conf.urls.static import static
+
+   urlpatterns = [
+       # ...
+   ]
+
+   # Ajouter les URLs pour servir les fichiers médias en développement
+   if settings.DEBUG:
+       urlpatterns += static(settings.MEDIA_URL, document_root=settings.MEDIA_ROOT)
+   ```
+
+6. Redémarrer le serveur Django
 
 ## Problèmes d'utilisation
 
