@@ -72,6 +72,15 @@ L'application prend en charge l'importation de fichiers MDF (Measurement Data Fo
 
 Les différents types de données (texte, courbes, laser 2D, images) seront automatiquement détectés et des visualisations appropriées seront générées.
 
+#### Bibliothèques MDF supportées
+
+Cette application utilise deux bibliothèques pour le traitement des fichiers MDF:
+
+- **mdfreader**: Par défaut, plus robuste et efficace pour la plupart des fichiers MDF
+- **asammdf**: Alternative également disponible, plus lourde mais compatible avec certains formats spécifiques
+
+Pour choisir quelle bibliothèque utiliser, la branche `main` utilise asammdf, et la branche `feat/mdfreader-parser` utilise mdfreader.
+
 ### Générer un fichier MDF de test
 
 Si vous n'avez pas de fichier MDF à disposition, vous pouvez en générer un avec le script fourni:
