@@ -21,22 +21,132 @@
         </div>
         <div class="card-body">
             <div class="row mb-3">
-                <div class="col-md-6">
+                <div class="col-md-4">
                     <strong>Niveau:</strong> 
                     <span class="badge bg-{% if log.level == 'DEBUG' %}secondary{% elif log.level == 'INFO' %}primary{% elif log.level == 'WARNING' %}warning{% elif log.level == 'ERROR' %}danger{% elif log.level == 'CRITICAL' %}danger{% endif %}">
                         {{ log.level }}
                     </span>
                 </div>
-                <div class="col-md-6">
+                <div class="col-md-4">
+                    <strong>Type:</strong>
+                    <span class="badge bg-info">{{ log.get_log_type_display }}</span>
+                </div>
+                <div class="col-md-4">
                     <strong>Source:</strong> {{ log.source }}
                 </div>
             </div>
-            <div class="row">
+            
+            <!-- Message du log -->
+            <div class="row mb-4">
                 <div class="col-12">
                     <strong>Message:</strong>
                     <pre class="mt-2 p-3 bg-light">{{ log.message }}</pre>
                 </div>
             </div>
+            
+            <!-- Contenu spécifique au type de log -->
+            {% if log.log_type == 'TEXT' %}
+                <!-- Rien de spécial à afficher pour les logs textuels -->
+            
+            {% elif log.log_type == 'CURVE' %}
+                <div class="row">
+                    <div class="col-12">
+                        <div class="d-flex justify-content-between align-items-center mb-2">
+                            <h5>Données de courbe</h5>
+                            <a href="{% url 'robot_logs:curve_view' log.id %}" class="btn btn-sm btn-outline-primary">
+                                <i class="bi bi-graph-up"></i> Voir la courbe
+                            </a>
+                        </div>
+                        
+                        {% if has_curve_data %}
+                            <div class="alert alert-info">
+                                <strong>{{ curve_measurements.count }}</strong> points de mesure disponibles pour le capteur 
+                                <strong>{{ curve_measurements.first.sensor_name }}</strong>.
+                            </div>
+                            
+                            {% if log.data_file %}
+                            <div class="text-center mb-3">
+                                <img src="{{ log.data_file.url }}" alt="Aperçu de la courbe" class="img-fluid" 
+                                     style="max-height: 300px; border: 1px solid #ddd;">
+                            </div>
+                            {% endif %}
+                        {% else %}
+                            <div class="alert alert-warning">
+                                Aucune donnée de courbe n'est associée à ce log.
+                            </div>
+                        {% endif %}
+                    </div>
+                </div>
+            
+            {% elif log.log_type == 'LASER2D' %}
+                <div class="row">
+                    <div class="col-12">
+                        <div class="d-flex justify-content-between align-items-center mb-2">
+                            <h5>Données laser 2D</h5>
+                            <a href="{% url 'robot_logs:laser_view' log.id %}" class="btn btn-sm btn-outline-primary">
+                                <i class="bi bi-bullseye"></i> Voir le scan laser
+                            </a>
+                        </div>
+                        
+                        {% if laser_scan %}
+                            <div class="alert alert-info">
+                                Scan laser disponible avec <strong>{{ laser_scan.get_range_data_as_list|length }}</strong> points.
+                            </div>
+                            
+                            {% if log.data_file %}
+                            <div class="text-center mb-3">
+                                <img src="{{ log.data_file.url }}" alt="Aperçu du scan laser" class="img-fluid" 
+                                     style="max-height: 300px; border: 1px solid #ddd;">
+                            </div>
+                            {% endif %}
+                        {% else %}
+                            <div class="alert alert-warning">
+                                Aucune donnée laser n'est associée à ce log.
+                            </div>
+                        {% endif %}
+                    </div>
+                </div>
+            
+            {% elif log.log_type == 'IMAGE' %}
+                <div class="row">
+                    <div class="col-12">
+                        <div class="d-flex justify-content-between align-items-center mb-2">
+                            <h5>Image</h5>
+                            <a href="{% url 'robot_logs:image_view' log.id %}" class="btn btn-sm btn-outline-primary">
+                                <i class="bi bi-image"></i> Voir l'image
+                            </a>
+                        </div>
+                        
+                        {% if image %}
+                            <div class="alert alert-info">
+                                Image disponible au format <strong>{{ image.format }}</strong> 
+                                ({{ image.width }}x{{ image.height }} pixels).
+                            </div>
+                            
+                            <div class="text-center mb-3">
+                                <img src="{{ image.image_file.url }}" alt="Image" class="img-fluid" 
+                                     style="max-height: 300px; border: 1px solid #ddd;">
+                            </div>
+                        {% else %}
+                            <div class="alert alert-warning">
+                                Aucune image n'est associée à ce log.
+                            </div>
+                        {% endif %}
+                    </div>
+                </div>
+            {% endif %}
+            
+            <!-- Métadonnées -->
+            {% if metadata %}
+            <div class="row mt-4">
+                <div class="col-12">
+                    <h5>Métadonnées</h5>
+                    <div class="metadata-container p-3 bg-light">
+                        <pre>{{ metadata|pprint }}</pre>
+                    </div>
+                </div>
+            </div>
+            {% endif %}
         </div>
     </div>
 {% endblock %}
