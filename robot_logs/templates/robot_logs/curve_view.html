@@ -2,125 +2,160 @@
 
 {% block title %}Données de courbe - LogViewer{% endblock %}
 
-{% block content %}
-<div class="d-flex justify-content-between align-items-center mb-3">
-    <h1>Données de courbe</h1>
-    <a href="{% url 'robot_logs:log_detail' log.id %}" class="btn btn-primary">Retour au détail</a>
-</div>
+{% block head_extra %}
+<script src="https://cdn.plot.ly/plotly-latest.min.js"></script>
+<style>
+    #curveChart {
+        width: 100%;
+        height: 500px;
+    }
+</style>
+{% endblock %}
 
-<div class="card mb-4">
-    <div class="card-header">
-        <div class="row">
-            <div class="col-md-6">
-                <strong>Date/Heure:</strong> {{ log.timestamp|date:"Y-m-d H:i:s" }}
-            </div>
-            <div class="col-md-6">
-                <strong>Robot ID:</strong> {{ log.robot_id }}
+{% block content %}
+<div class="container-fluid mt-4">
+    <nav aria-label="breadcrumb">
+        <ol class="breadcrumb">
+            <li class="breadcrumb-item"><a href="{% url 'robot_logs:log_list' %}">Accueil</a></li>
+            <li class="breadcrumb-item"><a href="{% url 'robot_logs:log_detail' log.id %}">Log #{{ log.id }}</a></li>
+            <li class="breadcrumb-item active" aria-current="page">Courbe</li>
+        </ol>
+    </nav>
+
+    <div class="d-flex justify-content-between align-items-center mb-3">
+        <h2>Données de courbe</h2>
+        <div>
+            <a href="{% url 'robot_logs:multi_curve_view' %}?curve_config={{ log.id }}:1" class="btn btn-primary">
+                <i class="bi bi-bar-chart"></i> Comparer avec d'autres courbes
+            </a>
+            <a href="{% url 'robot_logs:log_detail' log.id %}" class="btn btn-secondary">
+                <i class="bi bi-arrow-left"></i> Retour au détail
+            </a>
+        </div>
+    </div>
+
+    <div class="card mb-4">
+        <div class="card-header bg-primary text-white">
+            <h5 class="card-title mb-0">Informations</h5>
+        </div>
+        <div class="card-body">
+            <div class="row">
+                <div class="col-md-6">
+                    <table class="table table-sm table-borderless">
+                        <tr>
+                            <th>Date/Heure:</th>
+                            <td>{{ log.timestamp|date:"Y-m-d H:i:s" }}</td>
+                        </tr>
+                        <tr>
+                            <th>Robot ID:</th>
+                            <td>{{ log.robot_id }}</td>
+                        </tr>
+                        <tr>
+                            <th>Message:</th>
+                            <td>{{ log.message }}</td>
+                        </tr>
+                        <tr>
+                            <th>Source:</th>
+                            <td>{{ log.source }}</td>
+                        </tr>
+                    </table>
+                </div>
+                
+                <div class="col-md-6">
+                    {% if metadata %}
+                    <table class="table table-sm table-borderless">
+                        <tr>
+                            <th>Nom du capteur:</th>
+                            <td>{{ metadata.channel_name|default:"Non spécifié" }}</td>
+                        </tr>
+                        <tr>
+                            <th>Unité:</th>
+                            <td>{{ metadata.unit|default:"Non spécifiée" }}</td>
+                        </tr>
+                        <tr>
+                            <th>Nombre d'échantillons:</th>
+                            <td>{{ metadata.samples_count|default:"0" }}</td>
+                        </tr>
+                        <tr>
+                            <th>Durée:</th>
+                            <td>{{ metadata.duration|default:"0" }} secondes</td>
+                        </tr>
+                    </table>
+                    {% endif %}
+                </div>
             </div>
         </div>
     </div>
-    <div class="card-body">
-        <h5>{{ log.message }}</h5>
-        <p><strong>Source:</strong> {{ log.source }}</p>
-        
-        {% if metadata %}
-        <div class="mb-3">
-            <strong>Informations sur la courbe:</strong>
-            <ul>
-                <li><strong>Nom du capteur:</strong> {{ metadata.channel_name|default:"Non spécifié" }}</li>
-                <li><strong>Unité:</strong> {{ metadata.unit|default:"Non spécifiée" }}</li>
-                <li><strong>Nombre d'échantillons:</strong> {{ metadata.samples_count|default:"0" }}</li>
-                <li><strong>Durée:</strong> {{ metadata.duration|default:"0" }} secondes</li>
-            </ul>
+
+    <div class="card">
+        <div class="card-header bg-info text-white">
+            <h5 class="card-title mb-0">Visualisation de la courbe</h5>
         </div>
-        {% endif %}
-        
-        <div class="chart-container" style="position: relative; height:400px; width:100%">
-            <canvas id="curveChart"></canvas>
+        <div class="card-body">
+            <div class="alert alert-info">
+                <i class="bi bi-info-circle"></i> 
+                <strong>Astuce:</strong> Utilisez la molette de la souris pour zoomer, double-cliquez pour réinitialiser le zoom, 
+                et cliquez+glissez pour déplacer le graphique.
+            </div>
+            
+            <div id="curveChart"></div>
+            
+            {% if chart_data %}
+            <div class="text-muted mt-2 small">
+                Données chargées : {{ chart_data.timestamps|length }} points
+            </div>
+            {% endif %}
         </div>
     </div>
 </div>
 {% endblock %}
 
 {% block scripts %}
-<script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
-<script src="https://cdn.jsdelivr.net/npm/luxon@3.4.0/build/global/luxon.min.js"></script>
-<script src="https://cdn.jsdelivr.net/npm/chartjs-adapter-luxon@1.3.1/dist/chartjs-adapter-luxon.min.js"></script>
 <script>
-    const chartData = {{ chart_data|safe }};
-    
-    // Convertir les données pour Chart.js
-    const data = [];
-    for (let i = 0; i < chartData.timestamps.length; i++) {
-        data.push({
-            x: chartData.timestamps[i],
-            y: chartData.values[i]
+    document.addEventListener('DOMContentLoaded', function() {
+        const chartData = {{ chart_data|safe }};
+        
+        // Convertir les données pour Plotly.js
+        const timestamps = chartData.timestamps.map(function(ts) { 
+            return new Date(ts); 
         });
-    }
-    
-    // Configuration du graphique
-    const ctx = document.getElementById('curveChart').getContext('2d');
-    const myChart = new Chart(ctx, {
-        type: 'line',
-        data: {
-            datasets: [{
-                label: chartData.sensor_name || 'Mesures',
-                data: data,
-                borderColor: 'rgb(75, 192, 192)',
-                backgroundColor: 'rgba(75, 192, 192, 0.2)',
-                borderWidth: 1,
-                tension: 0.1,
-                pointRadius: 0,
-                pointHitRadius: 5
-            }]
-        },
-        options: {
-            responsive: true,
-            maintainAspectRatio: false,
-            interaction: {
-                mode: 'index',
-                intersect: false
-            },
-            scales: {
-                x: {
-                    type: 'time',
-                    time: {
-                        unit: 'second',
-                        tooltipFormat: 'yyyy-MM-dd HH:mm:ss.SSS'
-                    },
-                    title: {
-                        display: true,
-                        text: 'Temps'
-                    }
-                },
-                y: {
-                    title: {
-                        display: true,
-                        text: '{{ metadata.unit|default:"Valeur" }}'
-                    }
-                }
-            },
-            plugins: {
-                tooltip: {
-                    callbacks: {
-                        label: function(context) {
-                            return `${context.dataset.label}: ${context.parsed.y}`;
-                        }
-                    }
-                },
-                zoom: {
-                    zoom: {
-                        wheel: {
-                            enabled: true,
-                        },
-                        pinch: {
-                            enabled: true
-                        },
-                        mode: 'xy'
-                    }
-                }
+        
+        const trace = {
+            x: timestamps,
+            y: chartData.values,
+            type: 'scatter',
+            mode: 'lines',
+            name: chartData.sensor_name || 'Mesures',
+            line: {
+                color: 'rgb(75, 192, 192)',
+                width: 1.5
             }
-        }
+        };
+        
+        const layout = {
+            title: '{{ log.message }}',
+            xaxis: {
+                title: 'Temps',
+                type: 'date',
+                autorange: true
+            },
+            yaxis: {
+                title: '{{ metadata.unit|default:"Valeur" }}',
+                autorange: true
+            },
+            hovermode: 'closest',
+            showlegend: true
+        };
+        
+        const config = {
+            responsive: true,
+            scrollZoom: true,
+            displayModeBar: true,
+            modeBarButtonsToAdd: ['drawline', 'eraseshape'],
+            modeBarButtonsToRemove: ['lasso2d', 'select2d']
+        };
+        
+        Plotly.newPlot('curveChart', [trace], layout, config);
     });
 </script>
 {% endblock %}
