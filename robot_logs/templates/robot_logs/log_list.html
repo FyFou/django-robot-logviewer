@@ -30,6 +30,15 @@
                     </select>
                 </div>
                 <div class="col-md-3">
+                    <label for="log_type" class="form-label">Type</label>
+                    <select name="log_type" id="log_type" class="form-select">
+                        <option value="">Tous</option>
+                        {% for type_code, type_name in log_types.items %}
+                            <option value="{{ type_code }}" {% if request.GET.log_type == type_code %}selected{% endif %}>{{ type_name }}</option>
+                        {% endfor %}
+                    </select>
+                </div>
+                <div class="col-md-3">
                     <label for="date_start" class="form-label">Date début</label>
                     <input type="datetime-local" class="form-control" id="date_start" name="date_start" value="{{ request.GET.date_start }}">
                 </div>
@@ -37,7 +46,7 @@
                     <label for="date_end" class="form-label">Date fin</label>
                     <input type="datetime-local" class="form-control" id="date_end" name="date_end" value="{{ request.GET.date_end }}">
                 </div>
-                <div class="col-md-9">
+                <div class="col-md-6">
                     <label for="search" class="form-label">Recherche</label>
                     <input type="text" class="form-control" id="search" name="search" placeholder="Rechercher dans les messages..." value="{{ request.GET.search }}">
                 </div>
@@ -49,6 +58,14 @@
     </div>
     
     <div class="d-flex justify-content-end mb-3">
+        <a href="{% url 'robot_logs:import_mdf' %}" class="btn btn-info me-2">
+            <i class="bi bi-file-earmark-plus"></i> Importer fichier MDF
+        </a>
+        {% if has_mdf_files %}
+        <a href="{% url 'robot_logs:mdf_file_list' %}" class="btn btn-outline-info me-2">
+            <i class="bi bi-file-earmark-binary"></i> Voir les fichiers MDF
+        </a>
+        {% endif %}
         <button id="toggleRefresh" class="btn btn-primary me-2">
             <i class="bi bi-arrow-clockwise"></i> Activer l'actualisation auto
         </button>
@@ -64,6 +81,7 @@
                     <th>Date/Heure</th>
                     <th>Robot ID</th>
                     <th>Niveau</th>
+                    <th>Type</th>
                     <th>Message</th>
                     <th>Source</th>
                 </tr>
@@ -74,6 +92,7 @@
                         <td>{{ log.timestamp|date:"Y-m-d H:i:s" }}</td>
                         <td>{{ log.robot_id }}</td>
                         <td>{{ log.level }}</td>
+                        <td>{{ log.get_log_type_display }}</td>
                         <td>
                             <a href="{% url 'robot_logs:log_detail' log.pk %}">
                                 {{ log.message|truncatechars:100 }}
@@ -83,7 +102,7 @@
                     </tr>
                 {% empty %}
                     <tr>
-                        <td colspan="5" class="text-center">Aucun log trouvé.</td>
+                        <td colspan="6" class="text-center">Aucun log trouvé.</td>
                     </tr>
                 {% endfor %}
             </tbody>
