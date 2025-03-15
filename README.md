@@ -86,6 +86,10 @@ python scripts/generate_test_mdf.py
 
 Le fichier sera généré dans le répertoire courant sous le nom `test_mdf_file.mdf`.
 
+## Résolution des problèmes
+
+Si vous rencontrez des difficultés lors de l'installation ou de l'utilisation de LogViewer, consultez la [FAQ](docs/FAQ.md) qui couvre les problèmes les plus courants et leurs solutions.
+
 ## Structure du projet
 
 - `logViewer/` : Répertoire principal du projet Django
@@ -95,3 +99,4 @@ Le fichier sera généré dans le répertoire courant sous le nom `test_mdf_file
 - `robot_logs/templates/` : Templates HTML pour l'interface utilisateur
 - `robot_logs/mdf_parser.py` : Utilitaire pour parser les fichiers MDF
 - `scripts/` : Scripts utilitaires (génération de fichiers MDF de test)
+- `docs/` : Documentation supplémentaire, incluant la FAQ
