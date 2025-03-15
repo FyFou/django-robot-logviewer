@@ -9,8 +9,8 @@ import re
 from .mdfreader_adapter import MdfReaderAdapter, MDFREADER_AVAILABLE
 from .asammdf_adapter import AsamMdfAdapter, ASAMMDF_AVAILABLE
 from .utils import (
-    is_text_event, is_curve_data, is_laser_data, is_image_data,
-    process_text_event, process_curve_data, process_laser_data, process_image_data
+    is_text_event, is_curve_data, is_laser_data, is_image_data, is_can_data,
+    process_text_event, process_curve_data, process_laser_data, process_image_data, process_can_data
 )
 from ..models import RobotLog
 
@@ -130,25 +130,24 @@ class MDFParser:
             description = channel_info['description']
             
             # Déterminer le type de données et le traiter
-            if is_text_event(channel_name, data):
+            if is_can_data(channel_name, data):
+                logger.info(f"Canal {channel_name} détecté comme données CAN")
+                return process_can_data(channel_name, data, timestamps, unit, description)
+            elif is_text_event(channel_name, data):
                 logs = process_text_event(channel_name, data, timestamps, unit, description)
                 return logs, [], [], []
-                
             elif is_curve_data(channel_name, data):
                 main_log, curve_measurements = process_curve_data(channel_name, data, timestamps, unit, description)
                 return [main_log], curve_measurements, [], []
-                
             elif is_laser_data(channel_name, data):
                 main_log, laser_scan = process_laser_data(channel_name, data, timestamps, unit, description)
                 return [main_log], [], [laser_scan], []
-                
             elif is_image_data(channel_name, data):
                 main_log, image = process_image_data(channel_name, data, timestamps, unit, description)
                 if image:
                     return [main_log], [], [], [image]
                 else:
                     return [main_log], [], [], []
-                
             else:
                 # Canal non reconnu, créer un log simple
                 log = RobotLog(
@@ -207,6 +206,7 @@ class MDFParser:
             'laser_logs': 0,
             'image_logs': 0,
             'curve_measurements': 0,
+            'can_frames': 0,
             'errors': 0,
             'parser_used': self._adapter_type
         }
@@ -229,6 +229,7 @@ class MDFParser:
             logs, curve_measurements, laser_scans, images = self.process_channel(channel_name)
             
             # Sauvegarder les logs
+            can_frames_count = 0  # Compteur pour les trames CAN
             for log in logs:
                 try:
                     log.save()
@@ -255,14 +256,22 @@ class MDFParser:
                             image.save()
                         statistics['image_logs'] += 1
                     
-                    # Comptabiliser les logs textuels
+                    # Comptabiliser les logs textuels et les trames CAN
                     elif log.log_type == 'TEXT':
-                        statistics['text_logs'] += 1
+                        # Vérifier s'il s'agit d'une trame CAN
+                        if log.source.startswith("CAN Import:"):
+                            can_frames_count += 1
+                        else:
+                            statistics['text_logs'] += 1
                         
                 except Exception as e:
                     logger.error(f"Erreur lors de la sauvegarde des données pour {channel_name}: {str(e)}")
                     logger.error(traceback.format_exc())
                     statistics['errors'] += 1
+            
+            # Mettre à jour les statistiques des trames CAN
+            if can_frames_count > 0:
+                statistics['can_frames'] += can_frames_count
         
         # Marquer le fichier MDF comme traité
         if self.mdf_file:
