@@ -1,0 +1,235 @@
+{% extends 'robot_logs/base.html' %}
+{% load static %}
+
+{% block title %}Détails du message CAN | LogViewer{% endblock %}
+
+{% block head_extra %}
+<style>
+    .signal-value {
+        font-family: monospace;
+        padding: 2px 4px;
+        background-color: #e9ecef;
+        border-radius: 3px;
+    }
+    .raw-data {
+        font-family: monospace;
+        word-break: break-all;
+    }
+    .byte {
+        display: inline-block;
+        margin: 0 3px;
+        padding: 3px 6px;
+        background-color: #f8f9fa;
+        border: 1px solid #dee2e6;
+        border-radius: 3px;
+    }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="container-fluid mt-4">
+    <div class="row">
+        <div class="col-12">
+            <nav aria-label="breadcrumb">
+                <ol class="breadcrumb">
+                    <li class="breadcrumb-item"><a href="{% url 'robot_logs:log_list' %}">Accueil</a></li>
+                    <li class="breadcrumb-item"><a href="{% url 'robot_logs:log_detail' log.id %}">Log #{{ log.id }}</a></li>
+                    <li class="breadcrumb-item"><a href="{% url 'robot_logs:can_view' log.id %}">Données CAN</a></li>
+                    <li class="breadcrumb-item active" aria-current="page">Message #{{ message.id }}</li>
+                </ol>
+            </nav>
+            
+            <div class="card mb-4">
+                <div class="card-header bg-primary text-white">
+                    <h5 class="card-title mb-0">
+                        {% if message.message_name %}
+                            {{ message.message_name }} 
+                            <small class="text-light">(<code>{{ message.can_id }}</code>)</small>
+                        {% else %}
+                            Message CAN <code>{{ message.can_id }}</code>
+                        {% endif %}
+                    </h5>
+                </div>
+                <div class="card-body">
+                    <div class="row">
+                        <div class="col-md-6">
+                            <h5>Informations générales</h5>
+                            <table class="table table-bordered">
+                                <tr>
+                                    <th>Date/Heure</th>
+                                    <td>{{ message.timestamp }}</td>
+                                </tr>
+                                <tr>
+                                    <th>ID CAN</th>
+                                    <td><code>{{ message.can_id }}</code></td>
+                                </tr>
+                                {% if message.message_name %}
+                                <tr>
+                                    <th>Nom du message</th>
+                                    <td>{{ message.message_name }}</td>
+                                </tr>
+                                {% endif %}
+                                <tr>
+                                    <th>Log associé</th>
+                                    <td><a href="{% url 'robot_logs:log_detail' log.id %}">Log #{{ log.id }}</a></td>
+                                </tr>
+                                <tr>
+                                    <th>Fichier DBC</th>
+                                    <td>
+                                        {% if log.mdf_file.dbc_file %}
+                                            <a href="{% url 'robot_logs:dbc_file_detail' log.mdf_file.dbc_file.id %}">
+                                                {{ log.mdf_file.dbc_file.name }}
+                                            </a>
+                                        {% else %}
+                                            <span class="text-muted">Aucun</span>
+                                        {% endif %}
+                                    </td>
+                                </tr>
+                            </table>
+                        </div>
+                        
+                        <div class="col-md-6">
+                            <h5>Données brutes</h5>
+                            <div class="card">
+                                <div class="card-body raw-data">
+                                    <p><strong>Hexadécimal:</strong> <code>{{ message.raw_data }}</code></p>
+                                    
+                                    <!-- Séparation par octets pour meilleure lisibilité -->
+                                    <p>
+                                        <strong>Par octet:</strong><br>
+                                        {% for i in "01234567"|make_list %}
+                                            {% with start=i|add:i|stringformat:"d" %}
+                                                {% with end=start|add:"2"|stringformat:"d" %}
+                                                    <span class="byte">{{ message.raw_data|slice:start:end }}</span>
+                                                {% endwith %}
+                                            {% endwith %}
+                                        {% endfor %}
+                                    </p>
+                                    
+                                    <!-- Conversion en binaire de chaque octet (si applicable) -->
+                                    {% if message.raw_data|length <= 16 %}
+                                        <p>
+                                            <strong>Binaire:</strong><br>
+                                            {% for i in "01234567"|make_list %}
+                                                {% with start=i|add:i|stringformat:"d" %}
+                                                    {% with end=start|add:"2"|stringformat:"d" %}
+                                                        {% with byte=message.raw_data|slice:start:end %}
+                                                            {% if byte %}
+                                                                <div class="mb-1">
+                                                                    <span class="byte">{{ byte }}</span> → 
+                                                                    {% comment %}
+                                                                    Dans un vrai projet, ici nous utiliserions un filtre
+                                                                    personnalisé pour convertir l'hexa en binaire,
+                                                                    mais pour l'exemple nous affichons juste une chaîne fixe.
+                                                                    {% endcomment %}
+                                                                    <code>10010110</code>
+                                                                </div>
+                                                            {% endif %}
+                                                        {% endwith %}
+                                                    {% endwith %}
+                                                {% endwith %}
+                                            {% endfor %}
+                                        </p>
+                                    {% endif %}
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                    
+                    <div class="row mt-4">
+                        <div class="col-12">
+                            <h5>Signaux décodés</h5>
+                            {% if signals.exists %}
+                                <div class="table-responsive">
+                                    <table class="table table-striped">
+                                        <thead>
+                                            <tr>
+                                                <th>Signal</th>
+                                                <th>Valeur</th>
+                                                <th>Unité</th>
+                                            </tr>
+                                        </thead>
+                                        <tbody>
+                                            {% for signal in signals %}
+                                                <tr>
+                                                    <td>{{ signal.name }}</td>
+                                                    <td><span class="signal-value">{{ signal.value }}</span></td>
+                                                    <td>{{ signal.unit|default:"-" }}</td>
+                                                </tr>
+                                            {% endfor %}
+                                        </tbody>
+                                    </table>
+                                </div>
+                            {% elif decoded_data %}
+                                <!-- Affichage des données décodées en temps réel -->
+                                <div class="table-responsive">
+                                    <table class="table table-striped">
+                                        <thead>
+                                            <tr>
+                                                <th>Signal</th>
+                                                <th>Valeur</th>
+                                                <th>Unité</th>
+                                            </tr>
+                                        </thead>
+                                        <tbody>
+                                            {% for name, data in decoded_data.items %}
+                                                <tr>
+                                                    <td>{{ name }}</td>
+                                                    <td>
+                                                        <span class="signal-value">
+                                                            {% if data.value is defined %}
+                                                                {{ data.value }}
+                                                            {% else %}
+                                                                {{ data }}
+                                                            {% endif %}
+                                                        </span>
+                                                    </td>
+                                                    <td>
+                                                        {% if data.unit is defined %}
+                                                            {{ data.unit }}
+                                                        {% else %}
+                                                            -
+                                                        {% endif %}
+                                                    </td>
+                                                </tr>
+                                            {% endfor %}
+                                        </tbody>
+                                    </table>
+                                </div>
+                            {% else %}
+                                <div class="alert alert-info">
+                                    <p>Aucun signal n'a été décodé pour ce message.</p>
+                                    {% if not log.mdf_file.dbc_file %}
+                                        <p>Pour décoder les signaux, associez un fichier DBC à ce fichier MDF.</p>
+                                        <a href="{% url 'robot_logs:dbc_file_upload' %}" class="btn btn-primary btn-sm">
+                                            <i class="fas fa-upload"></i> Télécharger un fichier DBC
+                                        </a>
+                                    {% endif %}
+                                </div>
+                            {% endif %}
+                        </div>
+                    </div>
+                </div>
+            </div>
+            
+            <div class="row">
+                <div class="col-12">
+                    <div class="card mb-4">
+                        <div class="card-header bg-info text-white">
+                            <h5 class="card-title mb-0">Actions</h5>
+                        </div>
+                        <div class="card-body">
+                            <a href="{% url 'robot_logs:can_view' log.id %}" class="btn btn-secondary">
+                                <i class="fas fa-arrow-left"></i> Retour à la liste des messages
+                            </a>
+                            <a href="{% url 'robot_logs:can_id_filter' log.id message.can_id %}" class="btn btn-primary">
+                                <i class="fas fa-filter"></i> Filtrer par ID {{ message.can_id }}
+                            </a>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}
