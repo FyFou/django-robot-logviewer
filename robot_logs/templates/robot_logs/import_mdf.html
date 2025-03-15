@@ -1,0 +1,85 @@
+{% extends 'robot_logs/base.html' %}
+
+{% block title %}Importer un fichier MDF - LogViewer{% endblock %}
+
+{% block content %}
+    <div class="d-flex justify-content-between align-items-center mb-3">
+        <h1>Importer un fichier MDF</h1>
+        <a href="{% url 'robot_logs:log_list' %}" class="btn btn-primary">Retour à la liste</a>
+    </div>
+    
+    <div class="card">
+        <div class="card-header">
+            Formulaire d'importation
+        </div>
+        <div class="card-body">
+            <form method="post" enctype="multipart/form-data">
+                {% csrf_token %}
+                
+                <div class="mb-3">
+                    <label for="{{ form.name.id_for_label }}" class="form-label">{{ form.name.label }}</label>
+                    {{ form.name }}
+                    <div class="form-text">{{ form.name.help_text }}</div>
+                    {% if form.name.errors %}
+                        <div class="alert alert-danger">
+                            {% for error in form.name.errors %}
+                                {{ error }}
+                            {% endfor %}
+                        </div>
+                    {% endif %}
+                </div>
+                
+                <div class="mb-3">
+                    <label for="{{ form.file.id_for_label }}" class="form-label">{{ form.file.label }}</label>
+                    {{ form.file }}
+                    <div class="form-text">{{ form.file.help_text }}</div>
+                    {% if form.file.errors %}
+                        <div class="alert alert-danger">
+                            {% for error in form.file.errors %}
+                                {{ error }}
+                            {% endfor %}
+                        </div>
+                    {% endif %}
+                </div>
+                
+                <div class="mb-3 form-check">
+                    {{ form.preview_first }}
+                    <label class="form-check-label" for="{{ form.preview_first.id_for_label }}">
+                        {{ form.preview_first.label }}
+                    </label>
+                    <div class="form-text">{{ form.preview_first.help_text }}</div>
+                </div>
+                
+                <div class="text-center">
+                    <button type="submit" class="btn btn-success">Importer</button>
+                </div>
+            </form>
+        </div>
+    </div>
+    
+    <div class="card mt-4">
+        <div class="card-header">
+            Informations sur le format MDF
+        </div>
+        <div class="card-body">
+            <p>
+                Le format MDF (Measurement Data Format) est un format de fichier binaire développé par Vector Informatik GmbH 
+                pour stocker des données de mesure, principalement utilisé dans l'industrie automobile pour les données CAN 
+                et autres bus de communication.
+            </p>
+            <p>
+                Ce format permet de stocker différents types de données :
+            </p>
+            <ul>
+                <li>Événements textuels (logs, messages)</li>
+                <li>Données de courbes (mesures de capteurs)</li>
+                <li>Données laser 2D (scans)</li>
+                <li>Images (si disponibles)</li>
+            </ul>
+            <p>
+                Une fois importés, ces différents types de données seront disponibles dans l'interface LogViewer 
+                avec des visualisations adaptées.
+            </p>
+        </div>
+    </div>
+{% endblock %}
