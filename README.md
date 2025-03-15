@@ -39,7 +39,14 @@ Cette application permet de visualiser, filtrer et exporter les logs de robots d
    ```
 7. Générer des données de test (optionnel):
    ```bash
+   # Générer uniquement des logs de test
    python manage.py generate_test_logs 1000
+   
+   # Générer des logs et des fichiers MDF de test
+   python manage.py generate_test_logs 1000 --mdf
+   
+   # Spécifier le nombre de fichiers MDF à générer
+   python manage.py generate_test_logs 1000 --mdf --mdf-count 5
    ```
 8. Lancer le serveur de développement:
    ```bash
@@ -65,6 +72,20 @@ L'application prend en charge l'importation de fichiers MDF (Measurement Data Fo
 
 Les différents types de données (texte, courbes, laser 2D, images) seront automatiquement détectés et des visualisations appropriées seront générées.
 
+### Générer un fichier MDF de test
+
+Si vous n'avez pas de fichier MDF à disposition, vous pouvez en générer un avec le script fourni:
+
+```bash
+# Assurer que asammdf est installé
+pip install asammdf numpy
+
+# Générer un fichier MDF
+python scripts/generate_test_mdf.py
+```
+
+Le fichier sera généré dans le répertoire courant sous le nom `test_mdf_file.mdf`.
+
 ## Structure du projet
 
 - `logViewer/` : Répertoire principal du projet Django
@@ -73,3 +94,4 @@ Les différents types de données (texte, courbes, laser 2D, images) seront auto
 - `robot_logs/views.py` : Vues pour l'affichage et l'exportation des logs
 - `robot_logs/templates/` : Templates HTML pour l'interface utilisateur
 - `robot_logs/mdf_parser.py` : Utilitaire pour parser les fichiers MDF
+- `scripts/` : Scripts utilitaires (génération de fichiers MDF de test)
