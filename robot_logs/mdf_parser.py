@@ -1,10 +1,11 @@
 """
 Module pour parser les fichiers MDF (Measurement Data Format) de Vector.
-Version corrigée pour gérer les canaux dupliqués dans les fichiers MDF.
+Version améliorée pour gérer les canaux dupliqués et les données CAN.
 """
 import os
 import json
 import tempfile
+import binascii
 from datetime import datetime
 import numpy as np
 from asammdf import MDF
@@ -15,7 +16,8 @@ import io
 from django.conf import settings
 from django.core.files.base import ContentFile
 
-from .models import RobotLog, CurveMeasurement, Laser2DScan, ImageData, MDFFile
+from .models import RobotLog, CurveMeasurement, Laser2DScan, ImageData, MDFFile, CANMessage, CANSignal
+from .can_parser import DBCParser, extract_can_messages_from_mdf
 
 logger = logging.getLogger(__name__)
 
@@ -33,6 +35,7 @@ class MDFParser:
         self.file_path = file_path
         self.mdf_file = mdf_file_obj
         self._mdf = None
+        self._dbc_parser = None
         
     def open(self):
         """Ouvre le fichier MDF"""
@@ -51,6 +54,18 @@ class MDFParser:
         if self._mdf:
             self._mdf.close()
             self._mdf = None
+    
+    def initialize_dbc_parser(self, dbc_file):
+        """Initialise le parseur DBC si un fichier est fourni"""
+        try:
+            if dbc_file and dbc_file.file:
+                self._dbc_parser = DBCParser(dbc_file.file.path)
+                logger.info(f"Parseur DBC initialisé avec le fichier {dbc_file.name}")
+                return True
+            return False
+        except Exception as e:
+            logger.error(f"Erreur lors de l'initialisation du parseur DBC: {e}")
+            return False
     
     def get_channels(self):
         """Retourne la liste des canaux disponibles dans le fichier MDF"""
@@ -114,293 +129,17 @@ class MDFParser:
             logger.error(f"Erreur lors de la récupération des infos du canal {channel_name}: {e}")
             return None
     
-    def _is_text_event(self, channel_name, signal):
-        """Détermine si un canal contient des événements textuels"""
-        # Logique pour détecter un canal d'événements textuels
-        # Par exemple, vérifie si le canal contient des chaînes ou si son nom suggère un événement
-        if 'event' in channel_name.lower() or 'message' in channel_name.lower():
-            return True
-        
-        # Vérifie le type de données
-        if hasattr(signal, 'samples') and signal.samples.dtype.kind in ['S', 'U']:
-            return True
-            
-        return False
+    # Fonctions de détection du type de canal
+    from .mdf_detector import (
+        _is_text_event, _is_curve_data, _is_laser_data, 
+        _is_image_data, _is_can_data
+    )
     
-    def _is_curve_data(self, channel_name, signal):
-        """Détermine si un canal contient des données de courbe"""
-        # Vérifie si c'est une série de valeurs numériques
-        if (hasattr(signal, 'samples') and 
-            signal.samples.dtype.kind in ['i', 'u', 'f'] and 
-            len(signal.samples) > 1):
-            return True
-            
-        return False
-    
-    def _is_laser_data(self, channel_name, signal):
-        """Détermine si un canal contient des données laser 2D"""
-        # Logique pour détecter un canal de données laser
-        # Par exemple, vérifie si le nom du canal contient des mots-clés comme "laser" ou "scan"
-        if 'laser' in channel_name.lower() or 'scan' in channel_name.lower() or 'lidar' in channel_name.lower():
-            # Vérifie également si les données ressemblent à un scan laser (tableau de distances)
-            if (hasattr(signal, 'samples') and 
-                signal.samples.dtype.kind in ['i', 'u', 'f'] and 
-                len(signal.samples) > 10):
-                return True
-                
-        return False
-    
-    def _is_image_data(self, channel_name, signal):
-        """Détermine si un canal contient des données d'image"""
-        # Logique pour détecter un canal d'image
-        if 'image' in channel_name.lower() or 'camera' in channel_name.lower() or 'photo' in channel_name.lower():
-            return True
-            
-        # Vérifier si c'est un tableau d'octets assez grand pour être une image
-        if (hasattr(signal, 'samples') and 
-            signal.samples.dtype.kind == 'u' and 
-            signal.samples.dtype.itemsize == 1 and
-            len(signal.samples) > 1000):  # Disons qu'une image fait au moins 1 Ko
-            return True
-            
-        return False
-    
-    def _process_text_event(self, channel_name, signal):
-        """Traite un canal comme un événement textuel et crée des logs"""
-        logs = []
-        
-        # Convertir les timestamps en datetime
-        timestamps = [datetime.fromtimestamp(ts) for ts in signal.timestamps]
-        
-        # Traiter chaque échantillon
-        for i, (ts, value) in enumerate(zip(timestamps, signal.samples)):
-            # Convertir la valeur en chaîne si nécessaire
-            if isinstance(value, (bytes, bytearray)):
-                try:
-                    value = value.decode('utf-8')
-                except UnicodeDecodeError:
-                    value = f"Données binaires ({len(value)} octets)"
-            elif not isinstance(value, str):
-                value = str(value)
-                
-            log = RobotLog(
-                timestamp=ts,
-                robot_id="MDF_Import",  # À adapter selon les métadonnées
-                level="INFO",  # Niveau par défaut
-                message=f"{channel_name}: {value}",
-                source="MDF Import",
-                log_type="TEXT"
-            )
-            
-            # Ajouter des métadonnées
-            metadata = {
-                'channel_name': channel_name,
-                'sample_index': i,
-                'unit': signal.unit if hasattr(signal, 'unit') else None,
-                'comment': signal.comment if hasattr(signal, 'comment') else None,
-            }
-            log.set_metadata_from_dict(metadata)
-            
-            logs.append(log)
-            
-        return logs
-    
-    def _process_curve_data(self, channel_name, signal):
-        """Traite un canal comme des données de courbe"""
-        # Créer un log principal pour cette courbe
-        main_log = RobotLog(
-            timestamp=datetime.fromtimestamp(signal.timestamps[0]),
-            robot_id="MDF_Import",
-            level="INFO",
-            message=f"Données de courbe pour {channel_name}",
-            source="MDF Import",
-            log_type="CURVE"
-        )
-        
-        # Ajouter des métadonnées
-        metadata = {
-            'channel_name': channel_name,
-            'samples_count': len(signal.samples),
-            'unit': signal.unit if hasattr(signal, 'unit') else None,
-            'start_time': signal.timestamps[0],
-            'end_time': signal.timestamps[-1],
-            'duration': signal.timestamps[-1] - signal.timestamps[0],
-        }
-        main_log.set_metadata_from_dict(metadata)
-        
-        # Générer un graphique de la courbe pour prévisualisation
-        try:
-            import matplotlib.pyplot as plt
-            plt.figure(figsize=(10, 6))
-            plt.plot(signal.timestamps, signal.samples)
-            plt.title(f"Courbe: {channel_name}")
-            plt.xlabel("Temps (s)")
-            plt.ylabel(signal.unit if hasattr(signal, 'unit') else "Valeur")
-            plt.grid(True)
-            
-            # Sauvegarder l'image dans un buffer
-            img_buffer = io.BytesIO()
-            plt.savefig(img_buffer, format='PNG')
-            img_buffer.seek(0)
-            plt.close()
-            
-            # Attacher l'image au log
-            main_log.data_file.save(
-                f"{channel_name}_preview.png",
-                ContentFile(img_buffer.getvalue()),
-                save=False
-            )
-        except Exception as e:
-            logger.error(f"Erreur lors de la génération du graphique pour {channel_name}: {e}")
-        
-        # Créer les mesures de courbe associées
-        curve_measurements = []
-        for i, (ts, value) in enumerate(zip(signal.timestamps, signal.samples)):
-            measurement = CurveMeasurement(
-                timestamp=datetime.fromtimestamp(ts),
-                sensor_name=channel_name,
-                value=float(value)
-            )
-            curve_measurements.append(measurement)
-        
-        return main_log, curve_measurements
-    
-    def _process_laser_data(self, channel_name, signal):
-        """Traite un canal comme des données laser 2D"""
-        # Créer un log principal pour ces données laser
-        main_log = RobotLog(
-            timestamp=datetime.fromtimestamp(signal.timestamps[0]),
-            robot_id="MDF_Import",
-            level="INFO",
-            message=f"Données laser 2D pour {channel_name}",
-            source="MDF Import",
-            log_type="LASER2D"
-        )
-        
-        # Estimer les paramètres du laser
-        # Ceci est une estimation - les vrais paramètres devraient être dans les métadonnées du MDF
-        angle_min = -np.pi / 2  # Par défaut, supposons un scan de 180 degrés
-        angle_max = np.pi / 2
-        angle_increment = np.pi / len(signal.samples)
-        
-        # Ajouter des métadonnées
-        metadata = {
-            'channel_name': channel_name,
-            'points_count': len(signal.samples),
-            'unit': signal.unit if hasattr(signal, 'unit') else 'm',
-            'angle_min': angle_min,
-            'angle_max': angle_max,
-            'angle_increment': angle_increment,
-        }
-        main_log.set_metadata_from_dict(metadata)
-        
-        # Créer l'objet de scan laser
-        laser_scan = Laser2DScan(
-            timestamp=datetime.fromtimestamp(signal.timestamps[0]),
-            angle_min=angle_min,
-            angle_max=angle_max,
-            angle_increment=angle_increment
-        )
-        
-        # Convertir les données de plage en liste et les stocker
-        range_data = signal.samples.tolist()
-        laser_scan.set_range_data_from_list(range_data)
-        
-        # Générer une visualisation du scan laser
-        try:
-            import matplotlib.pyplot as plt
-            
-            # Créer un graphique polaire
-            fig = plt.figure(figsize=(8, 8))
-            ax = fig.add_subplot(111, projection='polar')
-            
-            # Calculer les angles pour chaque mesure
-            angles = np.linspace(angle_min, angle_max, len(range_data))
-            
-            # Tracer les points du scan
-            ax.scatter(angles, range_data, s=2)
-            ax.set_title(f"Scan Laser: {channel_name}")
-            ax.grid(True)
-            
-            # Sauvegarder l'image dans un buffer
-            img_buffer = io.BytesIO()
-            plt.savefig(img_buffer, format='PNG')
-            img_buffer.seek(0)
-            plt.close()
-            
-            # Attacher l'image au log
-            main_log.data_file.save(
-                f"{channel_name}_laser_preview.png",
-                ContentFile(img_buffer.getvalue()),
-                save=False
-            )
-        except Exception as e:
-            logger.error(f"Erreur lors de la génération de la visualisation laser pour {channel_name}: {e}")
-        
-        return main_log, laser_scan
-    
-    def _process_image_data(self, channel_name, signal):
-        """Traite un canal comme des données d'image"""
-        # Créer un log principal pour cette image
-        main_log = RobotLog(
-            timestamp=datetime.fromtimestamp(signal.timestamps[0]),
-            robot_id="MDF_Import",
-            level="INFO",
-            message=f"Image pour {channel_name}",
-            source="MDF Import",
-            log_type="IMAGE"
-        )
-        
-        # Essayer de déterminer le type d'image et de la décoder
-        try:
-            # Convertir les données en tableau d'octets
-            image_data = signal.samples.tobytes()
-            
-            # Essayer de créer une image à partir des données
-            img = Image.open(io.BytesIO(image_data))
-            
-            # Créer l'objet ImageData
-            image_obj = ImageData(
-                timestamp=datetime.fromtimestamp(signal.timestamps[0]),
-                width=img.width,
-                height=img.height,
-                format=img.format if img.format else 'JPEG',
-                description=f"Image extraite du canal {channel_name}"
-            )
-            
-            # Enregistrer l'image
-            img_io = io.BytesIO()
-            img.save(img_io, format=img.format if img.format else 'JPEG')
-            img_io.seek(0)
-            
-            # Sauvegarder l'image dans le champ image_file
-            image_obj.image_file.save(
-                f"{channel_name}_image.jpg",
-                ContentFile(img_io.getvalue()),
-                save=False
-            )
-            
-            # Utiliser la même image comme aperçu pour le log
-            main_log.data_file.save(
-                f"{channel_name}_image_preview.jpg",
-                ContentFile(img_io.getvalue()),
-                save=False
-            )
-            
-            return main_log, image_obj
-            
-        except Exception as e:
-            logger.error(f"Erreur lors du traitement de l'image pour {channel_name}: {e}")
-            
-            # En cas d'échec, créer une entrée de journal simple
-            metadata = {
-                'channel_name': channel_name,
-                'data_size': len(signal.samples),
-                'error': str(e)
-            }
-            main_log.set_metadata_from_dict(metadata)
-            
-            return main_log, None
+    # Fonctions de traitement des différents types de canaux
+    from .mdf_processors import (
+        _process_text_event, _process_curve_data, _process_laser_data,
+        _process_image_data, _process_can_data
+    )
     
     def process_channel(self, channel_name):
         """
@@ -410,11 +149,11 @@ class MDFParser:
             channel_name: Nom du canal à traiter
             
         Returns:
-            Tuple contenant (logs, curve_measurements, laser_scans, images)
+            Tuple contenant (logs, curve_measurements, laser_scans, images, can_messages)
         """
         if not self._mdf:
             if not self.open():
-                return [], [], [], []
+                return [], [], [], [], []
         
         try:
             # Trouver la localisation correcte du canal
@@ -430,7 +169,7 @@ class MDFParser:
                     source="MDF Import",
                     log_type="TEXT"
                 )
-                return [error_log], [], [], []
+                return [error_log], [], [], [], []
             
             group, index = location
             signal = self._mdf.get(channel_name, group=group, index=index)
@@ -438,19 +177,23 @@ class MDFParser:
             # Déterminer le type de données
             if self._is_text_event(channel_name, signal):
                 logs = self._process_text_event(channel_name, signal)
-                return logs, [], [], []
+                return logs, [], [], [], []
                 
             elif self._is_curve_data(channel_name, signal):
                 main_log, curve_measurements = self._process_curve_data(channel_name, signal)
-                return [main_log], curve_measurements, [], []
+                return [main_log], curve_measurements, [], [], []
                 
             elif self._is_laser_data(channel_name, signal):
                 main_log, laser_scan = self._process_laser_data(channel_name, signal)
-                return [main_log], [], [laser_scan], []
+                return [main_log], [], [laser_scan], [], []
                 
             elif self._is_image_data(channel_name, signal):
                 main_log, image = self._process_image_data(channel_name, signal)
-                return [main_log], [], [], [image] if image else []
+                return [main_log], [], [], [image] if image else [], []
+                
+            elif self._is_can_data(channel_name, signal):
+                main_log, can_messages = self._process_can_data(channel_name, signal)
+                return [main_log], [], [], [], can_messages
                 
             else:
                 # Canal non reconnu, créer un log simple
@@ -472,7 +215,7 @@ class MDFParser:
                 }
                 log.set_metadata_from_dict(metadata)
                 
-                return [log], [], [], []
+                return [log], [], [], [], []
                 
         except Exception as e:
             logger.error(f"Erreur lors du traitement du canal {channel_name}: {e}")
@@ -485,12 +228,15 @@ class MDFParser:
                 source="MDF Import",
                 log_type="TEXT"
             )
-            return [error_log], [], [], []
+            return [error_log], [], [], [], []
     
-    def process_file(self):
+    def process_file(self, dbc_file=None):
         """
         Traite l'ensemble du fichier MDF et importe tous les canaux
         
+        Args:
+            dbc_file: Fichier DBC optionnel pour décoder les messages CAN
+            
         Returns:
             Dictionnaire contenant des statistiques sur les données importées
         """
@@ -498,13 +244,24 @@ class MDFParser:
             if not self.open():
                 return {'error': 'Impossible d\'ouvrir le fichier MDF'}
         
+        # Initialiser le parseur DBC si un fichier est fourni
+        if dbc_file:
+            self.initialize_dbc_parser(dbc_file)
+            # Associer le fichier DBC au fichier MDF
+            if self.mdf_file:
+                self.mdf_file.dbc_file = dbc_file
+                self.mdf_file.save()
+        
         statistics = {
             'total_channels': 0,
             'text_logs': 0,
             'curve_logs': 0,
             'laser_logs': 0,
             'image_logs': 0,
+            'can_logs': 0,
             'curve_measurements': 0,
+            'can_messages': 0,
+            'can_signals': 0,
             'errors': 0
         }
         
@@ -514,7 +271,7 @@ class MDFParser:
         
         # Traiter chaque canal
         for channel_name in channels:
-            logs, curve_measurements, laser_scans, images = self.process_channel(channel_name)
+            logs, curve_measurements, laser_scans, images, can_messages = self.process_channel(channel_name)
             
             # Sauvegarder les logs
             for log in logs:
@@ -542,6 +299,27 @@ class MDFParser:
                             image.log = log
                             image.save()
                         statistics['image_logs'] += 1
+                    
+                    # Associer les messages CAN au log principal
+                    elif log.log_type == 'CAN' and can_messages:
+                        for can_message in can_messages:
+                            can_message.log = log
+                            can_message.save()
+                            
+                            # Si le message a des signaux décodés, les enregistrer
+                            if hasattr(can_message, 'signals_data') and can_message.signals_data:
+                                for name, signal_info in can_message.signals_data.items():
+                                    signal = CANSignal(
+                                        can_message=can_message,
+                                        name=name,
+                                        value=signal_info['value'] if isinstance(signal_info, dict) else signal_info,
+                                        unit=signal_info.get('unit', '') if isinstance(signal_info, dict) else ''
+                                    )
+                                    signal.save()
+                                    statistics['can_signals'] += 1
+                        
+                        statistics['can_messages'] += len(can_messages)
+                        statistics['can_logs'] += 1
                     
                     # Comptabiliser les logs textuels
                     elif log.log_type == 'TEXT':
