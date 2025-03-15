@@ -18,9 +18,15 @@ import os
 import sys
 import numpy as np
 import datetime
-from asammdf import MDF
-from asammdf.blocks.utils import MdfException
 import argparse
+
+try:
+    from asammdf import MDF
+    from asammdf.blocks.utils import MdfException
+except ImportError:
+    print("Erreur: La bibliothèque asammdf n'est pas installée.")
+    print("Installez-la avec: pip install asammdf")
+    sys.exit(1)
 
 def create_text_events():
     """Crée des événements textuels"""
@@ -139,6 +145,29 @@ def create_image_data():
     
     return timestamp, image_1d
 
+def append_simplified(mdf, timestamps, values, name, **kwargs):
+    """Version simplifiée de la méthode append qui fonctionne avec différentes versions de asammdf"""
+    try:
+        # Essayer avec les arguments nommés
+        mdf.append(timestamps, values, name, **kwargs)
+    except (TypeError, AttributeError):
+        try:
+            # Essayer sans les arguments nommés
+            mdf.append(timestamps, values, name)
+        except (TypeError, AttributeError) as e:
+            print(f"Erreur lors de l'ajout du signal {name}: {e}")
+            print("Essai d'une méthode alternative...")
+            
+            try:
+                # Méthode alternative - créer un groupe de signaux et l'ajouter
+                from asammdf.blocks.mdf_v4 import Signal
+                signal = Signal(samples=values, timestamps=timestamps, name=name)
+                signals = [signal]
+                mdf.append(signals)
+            except Exception as e2:
+                print(f"Échec de la méthode alternative: {e2}")
+                print("Impossible d'ajouter le signal.")
+
 def main():
     parser = argparse.ArgumentParser(description='Générer un fichier MDF de test')
     parser.add_argument('output_path', nargs='?', default='.', help='Chemin de sortie pour le fichier MDF')
@@ -147,43 +176,59 @@ def main():
     output_dir = args.output_path
     output_file = os.path.join(output_dir, 'test_mdf_file.mdf')
     
+    try:
+        # Vérifier la version de asammdf
+        from asammdf import __version__ as asammdf_version
+        print(f"Version de asammdf: {asammdf_version}")
+    except ImportError:
+        print("Impossible de déterminer la version de asammdf")
+    
     # Créer un nouveau fichier MDF (version 4.10)
-    mdf = MDF(version='4.10')
+    try:
+        mdf = MDF(version='4.10')
+    except Exception as e:
+        print(f"Erreur lors de la création du fichier MDF: {e}")
+        print("Essai avec la version par défaut...")
+        try:
+            mdf = MDF()
+        except Exception as e2:
+            print(f"Erreur lors de la création du fichier MDF avec version par défaut: {e2}")
+            return 1
     
     print("Génération des données...")
     
     # Ajouter des événements textuels
     print("- Ajout des événements textuels")
     text_timestamps, text_events = create_text_events()
-    mdf.append(text_timestamps, text_events, 'événements_texte', comment="Événements système")
+    append_simplified(mdf, text_timestamps, text_events, 'evenements_texte')
     
     # Ajouter des courbes
     print("- Ajout des données de courbes")
     sine_timestamps, sine_values = create_sine_wave()
-    mdf.append(sine_timestamps, sine_values, 'onde_sinus', comment="Onde sinusoïdale", unit="volts")
+    append_simplified(mdf, sine_timestamps, sine_values, 'onde_sinus')
     
     square_timestamps, square_values = create_square_wave()
-    mdf.append(square_timestamps, square_values, 'onde_carrée', comment="Onde carrée", unit="ampères")
+    append_simplified(mdf, square_timestamps, square_values, 'onde_carree')
     
     triangle_timestamps, triangle_values = create_triangle_wave()
-    mdf.append(triangle_timestamps, triangle_values, 'onde_triangle', comment="Onde triangulaire", unit="degrés")
+    append_simplified(mdf, triangle_timestamps, triangle_values, 'onde_triangle')
     
     # Ajouter un scan laser 2D
     print("- Ajout des données laser 2D")
     laser_timestamps, laser_distances = create_laser_scan()
-    mdf.append(laser_timestamps, laser_distances, 'scan_laser', comment="Scan laser 2D", unit="mètres")
+    append_simplified(mdf, laser_timestamps, laser_distances, 'scan_laser')
     
     # Ajouter des données d'image
     print("- Ajout des données d'image")
     image_timestamps, image_data = create_image_data()
-    mdf.append(image_timestamps, image_data, 'image_simple', comment="Image test 50x50")
+    append_simplified(mdf, image_timestamps, image_data, 'image_simple')
     
     # Sauvegarder le fichier
     print(f"Sauvegarde du fichier MDF dans {output_file}...")
     try:
         mdf.save(output_file, overwrite=True)
         print(f"Fichier MDF créé avec succès: {output_file}")
-    except MdfException as e:
+    except Exception as e:
         print(f"Erreur lors de la sauvegarde du fichier MDF: {e}")
         return 1
     
