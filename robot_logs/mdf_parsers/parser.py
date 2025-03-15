@@ -243,6 +243,7 @@ class MDFParser:
             'image_logs': 0,
             'curve_measurements': 0,
             'can_frames': 0,
+            'can_decoded': 0,
             'errors': 0,
             'parser_used': self._adapter_type
         }
@@ -266,6 +267,8 @@ class MDFParser:
             
             # Sauvegarder les logs
             can_frames_count = 0  # Compteur pour les trames CAN
+            can_decoded_count = 0  # Compteur pour les trames CAN décodées
+            
             for log in logs:
                 try:
                     log.save()
@@ -297,6 +300,10 @@ class MDFParser:
                         # Vérifier s'il s'agit d'une trame CAN
                         if log.source.startswith("CAN Import:"):
                             can_frames_count += 1
+                            
+                            # Vérifier si c'est une trame décodée
+                            if 'CAN Decoded:' in log.message:
+                                can_decoded_count += 1
                         else:
                             statistics['text_logs'] += 1
                         
@@ -308,6 +315,7 @@ class MDFParser:
             # Mettre à jour les statistiques des trames CAN
             if can_frames_count > 0:
                 statistics['can_frames'] += can_frames_count
+                statistics['can_decoded'] += can_decoded_count
         
         # Marquer le fichier MDF comme traité
         if self.mdf_file:
