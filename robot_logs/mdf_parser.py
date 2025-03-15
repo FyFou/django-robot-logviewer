@@ -1,6 +1,6 @@
 """
 Module pour parser les fichiers MDF (Measurement Data Format) pour l'application django-robot-logviewer.
-Cette version utilise la bibliothèque mdfreader pour un parsing plus robuste des fichiers MDF.
+Cette version utilise la bibliothèque mdfreader avec repli sur asammdf pour les formats non supportés.
 """
 import os
 import json
@@ -15,13 +15,25 @@ import traceback
 from django.conf import settings
 from django.core.files.base import ContentFile
 
-from mdfreader import Mdf
+# Import des deux bibliothèques avec gestion d'erreur
+try:
+    from mdfreader import Mdf as MdfReader
+    MDFREADER_AVAILABLE = True
+except ImportError:
+    MDFREADER_AVAILABLE = False
+
+try:
+    from asammdf import MDF as AsamMDF
+    ASAMMDF_AVAILABLE = True
+except ImportError:
+    ASAMMDF_AVAILABLE = False
+
 from .models import RobotLog, CurveMeasurement, Laser2DScan, ImageData, MDFFile
 
 logger = logging.getLogger(__name__)
 
 class MDFParser:
-    """Classe pour parser et traiter les fichiers MDF en utilisant mdfreader"""
+    """Classe pour parser et traiter les fichiers MDF avec support mdfreader et asammdf"""
     
     def __init__(self, file_path, mdf_file_obj=None):
         """
@@ -34,30 +46,57 @@ class MDFParser:
         self.file_path = file_path
         self.mdf_file = mdf_file_obj
         self._mdf = None
+        self._parser_type = None  # 'mdfreader' ou 'asammdf'
         
     def open(self):
-        """Ouvre le fichier MDF avec mdfreader"""
-        try:
-            # No_data_loading=True pour éviter de charger toutes les données en mémoire
-            # On va juste lire les métadonnées
-            self._mdf = Mdf(self.file_path, no_data_loading=True)
-            
-            if self.mdf_file:
-                self.mdf_file.mdf_version = f"MDF {self._mdf.MDFVersionNumber}"
-                self.mdf_file.save()
-            
-            logger.info(f"Fichier MDF ouvert avec succès: {self.file_path}")
-            return True
-        except Exception as e:
-            logger.error(f"Erreur lors de l'ouverture du fichier MDF: {str(e)}")
-            logger.error(traceback.format_exc())
-            return False
+        """Ouvre le fichier MDF avec mdfreader ou asammdf"""
+        # D'abord, essayer avec mdfreader
+        if MDFREADER_AVAILABLE:
+            try:
+                logger.info(f"Tentative d'ouverture avec mdfreader: {self.file_path}")
+                self._mdf = MdfReader(self.file_path, no_data_loading=True)
+                self._parser_type = 'mdfreader'
+                
+                if self.mdf_file:
+                    self.mdf_file.mdf_version = f"MDF {self._mdf.MDFVersionNumber}"
+                    self.mdf_file.save()
+                
+                logger.info(f"Fichier MDF ouvert avec succès avec mdfreader: {self.file_path}")
+                return True
+            except Exception as e:
+                logger.error(f"Échec de l'ouverture avec mdfreader: {str(e)}")
+                logger.error(traceback.format_exc())
+                # Continuer avec asammdf en cas d'échec
+        
+        # Ensuite, essayer avec asammdf si mdfreader a échoué
+        if ASAMMDF_AVAILABLE:
+            try:
+                logger.info(f"Tentative d'ouverture avec asammdf: {self.file_path}")
+                self._mdf = AsamMDF(self.file_path)
+                self._parser_type = 'asammdf'
+                
+                if self.mdf_file:
+                    self.mdf_file.mdf_version = f"MDF {self._mdf.version}"
+                    self.mdf_file.save()
+                
+                logger.info(f"Fichier MDF ouvert avec succès avec asammdf: {self.file_path}")
+                return True
+            except Exception as e:
+                logger.error(f"Échec de l'ouverture avec asammdf: {str(e)}")
+                logger.error(traceback.format_exc())
+        
+        # Si nous arrivons ici, aucune des bibliothèques n'a pu ouvrir le fichier
+        logger.error(f"Impossible d'ouvrir le fichier MDF avec mdfreader ou asammdf: {self.file_path}")
+        return False
     
     def close(self):
         """Ferme le fichier MDF"""
         if self._mdf:
+            if self._parser_type == 'asammdf':
+                self._mdf.close()
             self._mdf = None
-            logger.info("Fichier MDF fermé")
+            logger.info(f"Fichier MDF fermé ({self._parser_type})")
+            self._parser_type = None
     
     def get_channels(self):
         """Retourne la liste des canaux disponibles dans le fichier MDF"""
@@ -65,12 +104,17 @@ class MDFParser:
             if not self.open():
                 return []
         
-        # Récupérer tous les canaux disponibles
         channels = []
         
-        # Parcourir les masterlists pour obtenir tous les canaux
-        for master in self._mdf.masterChannelList:
-            for channel in self._mdf.masterChannelList[master]:
+        if self._parser_type == 'mdfreader':
+            # Récupérer les canaux avec mdfreader
+            for master in self._mdf.masterChannelList:
+                for channel in self._mdf.masterChannelList[master]:
+                    if channel not in channels:
+                        channels.append(channel)
+        else:  # asammdf
+            # Récupérer les canaux avec asammdf
+            for channel in self._mdf.channels_db:
                 if channel not in channels:
                     channels.append(channel)
         
@@ -84,20 +128,29 @@ class MDFParser:
                 return None
                 
         try:
-            # Charger les données du canal pour obtenir les infos
-            data = self._mdf.get_channel_data(channel_name)
-            
-            # Obtenir les informations du canal
-            unit = self._mdf.get_channel_unit(channel_name)
-            description = self._mdf.get_channel_desc(channel_name)
-            
-            return {
-                'name': channel_name,
-                'unit': unit if unit else '',
-                'comment': description if description else '',
-                'samples_count': len(data) if data is not None else 0,
-                'data_type': str(data.dtype) if data is not None else '',
-            }
+            if self._parser_type == 'mdfreader':
+                # Obtenir les infos avec mdfreader
+                data = self._mdf.get_channel_data(channel_name)
+                unit = self._mdf.get_channel_unit(channel_name)
+                description = self._mdf.get_channel_desc(channel_name)
+                
+                return {
+                    'name': channel_name,
+                    'unit': unit if unit else '',
+                    'comment': description if description else '',
+                    'samples_count': len(data) if data is not None else 0,
+                    'data_type': str(data.dtype) if hasattr(data, 'dtype') else '',
+                }
+            else:  # asammdf
+                # Obtenir les infos avec asammdf
+                signal = self._mdf.get(channel_name)
+                return {
+                    'name': channel_name,
+                    'unit': signal.unit if hasattr(signal, 'unit') else '',
+                    'comment': signal.comment if hasattr(signal, 'comment') else '',
+                    'samples_count': len(signal.samples) if hasattr(signal, 'samples') else 0,
+                    'data_type': str(signal.samples.dtype) if hasattr(signal, 'samples') else '',
+                }
         except Exception as e:
             logger.error(f"Erreur lors de la récupération des infos du canal {channel_name}: {str(e)}")
             logger.error(traceback.format_exc())
@@ -182,14 +235,35 @@ class MDFParser:
             metadata = {
                 'channel_name': channel_name,
                 'sample_index': i,
-                'unit': self._mdf.get_channel_unit(channel_name),
-                'description': self._mdf.get_channel_desc(channel_name),
             }
-            log.set_metadata_from_dict(metadata)
             
+            if self._parser_type == 'mdfreader':
+                metadata.update({
+                    'unit': self._mdf.get_channel_unit(channel_name),
+                    'description': self._mdf.get_channel_desc(channel_name),
+                })
+            
+            log.set_metadata_from_dict(metadata)
             logs.append(log)
             
         return logs
+    
+    def _get_unit_and_desc(self, channel_name):
+        """Récupère l'unité et la description d'un canal selon le parser utilisé"""
+        if self._parser_type == 'mdfreader':
+            return {
+                'unit': self._mdf.get_channel_unit(channel_name),
+                'description': self._mdf.get_channel_desc(channel_name)
+            }
+        else:  # asammdf
+            try:
+                signal = self._mdf.get(channel_name)
+                return {
+                    'unit': signal.unit if hasattr(signal, 'unit') else '',
+                    'description': signal.comment if hasattr(signal, 'comment') else ''
+                }
+            except:
+                return {'unit': '', 'description': ''}
     
     def _process_curve_data(self, channel_name, data, timestamps):
         """Traite un canal comme des données de courbe"""
@@ -203,11 +277,15 @@ class MDFParser:
             log_type="CURVE"
         )
         
+        # Récupérer l'unité et la description
+        channel_info = self._get_unit_and_desc(channel_name)
+        
         # Ajouter des métadonnées
         metadata = {
             'channel_name': channel_name,
             'samples_count': len(data),
-            'unit': self._mdf.get_channel_unit(channel_name),
+            'unit': channel_info['unit'],
+            'description': channel_info['description'],
             'start_time': timestamps[0],
             'end_time': timestamps[-1],
             'duration': timestamps[-1] - timestamps[0],
@@ -221,7 +299,7 @@ class MDFParser:
             plt.plot(timestamps, data)
             plt.title(f"Courbe: {channel_name}")
             plt.xlabel("Temps (s)")
-            plt.ylabel(self._mdf.get_channel_unit(channel_name) or "Valeur")
+            plt.ylabel(channel_info['unit'] or "Valeur")
             plt.grid(True)
             
             # Sauvegarder l'image dans un buffer
@@ -264,6 +342,9 @@ class MDFParser:
             log_type="LASER2D"
         )
         
+        # Récupérer l'unité et la description
+        channel_info = self._get_unit_and_desc(channel_name)
+        
         # Estimer les paramètres du laser (par défaut)
         angle_min = -np.pi / 2  # Par défaut, scan de 180 degrés
         angle_max = np.pi / 2
@@ -273,7 +354,8 @@ class MDFParser:
         metadata = {
             'channel_name': channel_name,
             'points_count': len(data),
-            'unit': self._mdf.get_channel_unit(channel_name) or 'm',
+            'unit': channel_info['unit'] or 'm',
+            'description': channel_info['description'],
             'angle_min': angle_min,
             'angle_max': angle_max,
             'angle_increment': angle_increment,
@@ -338,6 +420,9 @@ class MDFParser:
             log_type="IMAGE"
         )
         
+        # Récupérer l'unité et la description pour les métadonnées
+        channel_info = self._get_unit_and_desc(channel_name)
+        
         # Essayer de déterminer le type d'image et de la décoder
         try:
             # Convertir les données en tableau d'octets
@@ -384,11 +469,31 @@ class MDFParser:
             metadata = {
                 'channel_name': channel_name,
                 'data_size': len(data),
+                'unit': channel_info['unit'],
+                'description': channel_info['description'],
                 'error': str(e)
             }
             main_log.set_metadata_from_dict(metadata)
             
             return main_log, None
+    
+    def _get_channel_data_and_timestamps(self, channel_name):
+        """Récupère les données et timestamps d'un canal en fonction du parser utilisé"""
+        if self._parser_type == 'mdfreader':
+            data = self._mdf.get_channel_data(channel_name)
+            
+            # Récupérer les timestamps du canal
+            master_name = self._mdf.get_channel_master(channel_name)
+            if master_name:
+                timestamps = self._mdf.get_channel_data(master_name)
+            else:
+                # Si pas de master channel, créer des timestamps artificiels
+                timestamps = np.arange(len(data))
+                
+            return data, timestamps
+        else:  # asammdf
+            signal = self._mdf.get(channel_name)
+            return signal.samples, signal.timestamps
     
     def process_channel(self, channel_name):
         """
@@ -405,8 +510,8 @@ class MDFParser:
                 return [], [], [], []
         
         try:
-            # Récupérer les données du canal
-            data = self._mdf.get_channel_data(channel_name)
+            # Récupérer les données et timestamps du canal
+            data, timestamps = self._get_channel_data_and_timestamps(channel_name)
             
             # Si aucune donnée n'est disponible
             if data is None or (hasattr(data, '__len__') and len(data) == 0):
@@ -420,14 +525,6 @@ class MDFParser:
                     log_type="TEXT"
                 )
                 return [error_log], [], [], []
-            
-            # Récupérer les timestamps du canal
-            master_name = self._mdf.get_channel_master(channel_name)
-            if master_name:
-                timestamps = self._mdf.get_channel_data(master_name)
-            else:
-                # Si pas de master channel, créer des timestamps artificiels
-                timestamps = np.arange(len(data))
             
             # Déterminer le type de données
             if self._is_text_event(channel_name, data):
@@ -460,12 +557,16 @@ class MDFParser:
                     log_type="TEXT"
                 )
                 
+                # Récupérer l'unité et la description
+                channel_info = self._get_unit_and_desc(channel_name)
+                
                 # Ajouter des métadonnées
                 metadata = {
                     'channel_name': channel_name,
                     'samples_count': len(data),
                     'data_type': str(data.dtype) if hasattr(data, 'dtype') else str(type(data)),
-                    'unit': self._mdf.get_channel_unit(channel_name),
+                    'unit': channel_info['unit'],
+                    'description': channel_info['description'],
                 }
                 log.set_metadata_from_dict(metadata)
                 
@@ -497,6 +598,8 @@ class MDFParser:
             if not self.open():
                 return {'error': 'Impossible d\'ouvrir le fichier MDF'}
         
+        logger.info(f"Traitement du fichier MDF avec {self._parser_type}")
+        
         statistics = {
             'total_channels': 0,
             'text_logs': 0,
@@ -504,7 +607,8 @@ class MDFParser:
             'laser_logs': 0,
             'image_logs': 0,
             'curve_measurements': 0,
-            'errors': 0
+            'errors': 0,
+            'parser_used': self._parser_type
         }
         
         # Récupérer tous les canaux
