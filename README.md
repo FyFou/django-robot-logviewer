@@ -19,6 +19,7 @@ Cette application permet de visualiser, filtrer et exporter les logs de robots d
    ```bash
    python -m venv logviewer_env
    source logviewer_env/bin/activate  # Sur macOS/Linux
+   source logviewer_env/Scripts/activate  # Sur macOS/Linux
    logviewer_env\Scripts\activate  # Sur Windows
    ```
 3. Installer les dépendances:
