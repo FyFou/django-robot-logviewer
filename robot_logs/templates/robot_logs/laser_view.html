@@ -1,0 +1,187 @@
+{% extends 'robot_logs/base.html' %}
+
+{% block title %}Données Laser 2D - LogViewer{% endblock %}
+
+{% block content %}
+<div class="d-flex justify-content-between align-items-center mb-3">
+    <h1>Scan Laser 2D</h1>
+    <a href="{% url 'robot_logs:log_detail' log.id %}" class="btn btn-primary">Retour au détail</a>
+</div>
+
+<div class="card mb-4">
+    <div class="card-header">
+        <div class="row">
+            <div class="col-md-6">
+                <strong>Date/Heure:</strong> {{ log.timestamp|date:"Y-m-d H:i:s" }}
+            </div>
+            <div class="col-md-6">
+                <strong>Robot ID:</strong> {{ log.robot_id }}
+            </div>
+        </div>
+    </div>
+    <div class="card-body">
+        <h5>{{ log.message }}</h5>
+        <p><strong>Source:</strong> {{ log.source }}</p>
+        
+        {% if metadata %}
+        <div class="mb-3">
+            <strong>Informations sur le scan laser:</strong>
+            <ul>
+                <li><strong>Nom du canal:</strong> {{ metadata.channel_name|default:"Non spécifié" }}</li>
+                <li><strong>Angle min:</strong> {{ laser_scan.angle_min }} rad</li>
+                <li><strong>Angle max:</strong> {{ laser_scan.angle_max }} rad</li>
+                <li><strong>Incrément d'angle:</strong> {{ laser_scan.angle_increment }} rad</li>
+                <li><strong>Nombre de points:</strong> {{ metadata.points_count|default:"0" }}</li>
+            </ul>
+        </div>
+        {% endif %}
+        
+        <div class="laser-visualization-container" style="position: relative; height:500px; width:100%; background-color: #f8f9fa; border-radius: 5px;">
+            <svg id="laserVisualization" width="100%" height="100%"></svg>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script src="https://d3js.org/d3.v7.min.js"></script>
+<script>
+    // Données du scan laser
+    const visualizationData = {{ visualization_data|safe }};
+    
+    // Configuration de la visualisation
+    const width = document.getElementById('laserVisualization').clientWidth;
+    const height = document.getElementById('laserVisualization').clientHeight;
+    const margin = { top: 50, right: 50, bottom: 50, left: 50 };
+    
+    // Créer le SVG
+    const svg = d3.select('#laserVisualization');
+    
+    // Calculer l'échelle
+    const maxRange = visualizationData.max_range || 10;
+    const scale = Math.min(
+        (width - margin.left - margin.right) / (2 * maxRange),
+        (height - margin.top - margin.bottom) / (2 * maxRange)
+    );
+    
+    // Centre de la visualisation
+    const centerX = width / 2;
+    const centerY = height / 2;
+    
+    // Groupe principal
+    const g = svg.append('g')
+        .attr('transform', `translate(${centerX}, ${centerY})`);
+    
+    // Ajouter une grille de référence (cercles concentriques)
+    const gridRadii = [1, 2, 5, 10, 15, 20].filter(r => r <= maxRange);
+    
+    // Ajouter les cercles de la grille
+    g.selectAll('.grid-circle')
+        .data(gridRadii)
+        .enter()
+        .append('circle')
+        .attr('class', 'grid-circle')
+        .attr('r', d => d * scale)
+        .attr('fill', 'none')
+        .attr('stroke', '#ccc')
+        .attr('stroke-dasharray', '3,3');
+    
+    // Ajouter les étiquettes de distance
+    g.selectAll('.grid-label')
+        .data(gridRadii)
+        .enter()
+        .append('text')
+        .attr('class', 'grid-label')
+        .attr('x', 0)
+        .attr('y', d => -d * scale)
+        .attr('dy', -5)
+        .attr('text-anchor', 'middle')
+        .attr('fill', '#666')
+        .text(d => `${d}m`);
+    
+    // Ajouter un point pour représenter le scanner
+    g.append('circle')
+        .attr('r', 5)
+        .attr('fill', 'red');
+    
+    // Ajouter les points du scan
+    g.selectAll('.scan-point')
+        .data(visualizationData.points)
+        .enter()
+        .append('circle')
+        .attr('class', 'scan-point')
+        .attr('cx', d => d[0] * scale)
+        .attr('cy', d => -d[1] * scale)  // Inverser l'axe Y pour orientation standard
+        .attr('r', 2)
+        .attr('fill', 'blue');
+    
+    // Ajouter des axes
+    // Axe X
+    g.append('line')
+        .attr('x1', -maxRange * scale)
+        .attr('y1', 0)
+        .attr('x2', maxRange * scale)
+        .attr('y2', 0)
+        .attr('stroke', '#999')
+        .attr('stroke-width', 1);
+    
+    // Axe Y
+    g.append('line')
+        .attr('x1', 0)
+        .attr('y1', -maxRange * scale)
+        .attr('x2', 0)
+        .attr('y2', maxRange * scale)
+        .attr('stroke', '#999')
+        .attr('stroke-width', 1);
+    
+    // Étiquettes des axes
+    g.append('text')
+        .attr('x', maxRange * scale)
+        .attr('y', 15)
+        .attr('text-anchor', 'end')
+        .text('X (m)');
+    
+    g.append('text')
+        .attr('x', 15)
+        .attr('y', -maxRange * scale)
+        .attr('text-anchor', 'start')
+        .text('Y (m)');
+    
+    // Ajouter la légende
+    const legend = svg.append('g')
+        .attr('class', 'legend')
+        .attr('transform', `translate(${width - 100}, 20)`);
+    
+    // Point du scanner
+    legend.append('circle')
+        .attr('r', 5)
+        .attr('cx', 10)
+        .attr('cy', 10)
+        .attr('fill', 'red');
+    
+    legend.append('text')
+        .attr('x', 20)
+        .attr('y', 15)
+        .text('Scanner');
+    
+    // Point du scan
+    legend.append('circle')
+        .attr('r', 2)
+        .attr('cx', 10)
+        .attr('cy', 30)
+        .attr('fill', 'blue');
+    
+    legend.append('text')
+        .attr('x', 20)
+        .attr('y', 35)
+        .text('Point détecté');
+    
+    // Ajouter des contrôles de zoom
+    svg.call(d3.zoom()
+        .extent([[0, 0], [width, height]])
+        .scaleExtent([0.5, 10])
+        .on('zoom', function(event) {
+            g.attr('transform', `translate(${event.transform.x + centerX * event.transform.k}, ${event.transform.y + centerY * event.transform.k}) scale(${event.transform.k})`);
+        }));
+</script>
+{% endblock %}
