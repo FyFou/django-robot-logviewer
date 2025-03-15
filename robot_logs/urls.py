@@ -2,6 +2,7 @@ from django.urls import path
 from . import views
 from . import views_dbc
 from . import views_can
+from . import views_curve
 
 app_name = 'robot_logs'
 
@@ -20,6 +21,9 @@ urlpatterns = [
     path('log/<int:log_id>/curve/', views.CurveDataView.as_view(), name='curve_view'),
     path('log/<int:log_id>/laser/', views.Laser2DView.as_view(), name='laser_view'),
     path('log/<int:log_id>/image/', views.ImageDataView.as_view(), name='image_view'),
+    
+    # Vues pour les courbes avancées
+    path('curves/compare/', views_curve.MultiCurveView.as_view(), name='multi_curve_view'),
     
     # Nouvelles vues pour les fichiers DBC
     path('dbc-files/', views_dbc.DBCFileListView.as_view(), name='dbc_file_list'),
