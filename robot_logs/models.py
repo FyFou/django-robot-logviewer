@@ -15,6 +15,7 @@ class RobotLog(models.Model):
         ('CURVE', 'Courbe'),
         ('LASER2D', 'Laser 2D'),
         ('IMAGE', 'Image'),
+        ('CAN', 'CAN'),  # Nouveau type pour les données CAN
     )
     
     timestamp = models.DateTimeField(auto_now_add=False)
@@ -97,6 +98,40 @@ class ImageData(models.Model):
     def __str__(self):
         return f"Image for {self.log} at {self.timestamp}"
 
+class DBCFile(models.Model):
+    """Modèle pour stocker les fichiers DBC (Database CAN)"""
+    file = models.FileField(upload_to='dbc_files/')
+    name = models.CharField(max_length=255)
+    description = models.TextField(blank=True, null=True)
+    uploaded_at = models.DateTimeField(auto_now_add=True)
+    
+    def __str__(self):
+        return self.name
+
+class CANMessage(models.Model):
+    """Modèle pour stocker les messages CAN décodés"""
+    log = models.ForeignKey(RobotLog, on_delete=models.CASCADE, related_name='can_messages')
+    timestamp = models.DateTimeField()
+    can_id = models.CharField(max_length=10)  # ID du message CAN (en hexadécimal)
+    message_name = models.CharField(max_length=255, blank=True, null=True)  # Nom du message depuis le DBC
+    raw_data = models.CharField(max_length=50)  # Données brutes (hex)
+    
+    class Meta:
+        ordering = ['timestamp']
+        
+    def __str__(self):
+        return f"CAN {self.can_id} at {self.timestamp}"
+
+class CANSignal(models.Model):
+    """Modèle pour stocker les signaux extraits des messages CAN"""
+    can_message = models.ForeignKey(CANMessage, on_delete=models.CASCADE, related_name='signals')
+    name = models.CharField(max_length=255)
+    value = models.FloatField()
+    unit = models.CharField(max_length=50, blank=True, null=True)
+    
+    def __str__(self):
+        return f"{self.name}: {self.value} {self.unit or ''}"
+
 class MDFFile(models.Model):
     """Modèle pour stocker les fichiers MDF importés"""
     file = models.FileField(upload_to='mdf_files/')
@@ -104,6 +139,7 @@ class MDFFile(models.Model):
     uploaded_at = models.DateTimeField(auto_now_add=True)
     mdf_version = models.CharField(max_length=10, null=True, blank=True)
     processed = models.BooleanField(default=False)
+    dbc_file = models.ForeignKey(DBCFile, on_delete=models.SET_NULL, null=True, blank=True, related_name='mdf_files')
     
     def __str__(self):
         return self.name
