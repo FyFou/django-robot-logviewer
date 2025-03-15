@@ -1,0 +1,204 @@
+{% extends 'robot_logs/base.html' %}
+
+{% block title %}Logs Robot - LogViewer{% endblock %}
+
+{% block content %}
+    <h1>Logs Robot</h1>
+    
+    <div class="card mb-4">
+        <div class="card-header">
+            Filtres
+        </div>
+        <div class="card-body">
+            <form method="get" class="row g-3">
+                <div class="col-md-3">
+                    <label for="robot_id" class="form-label">Robot ID</label>
+                    <select name="robot_id" id="robot_id" class="form-select">
+                        <option value="">Tous</option>
+                        {% for robot_id in robot_ids %}
+                            <option value="{{ robot_id }}" {% if request.GET.robot_id == robot_id %}selected{% endif %}>{{ robot_id }}</option>
+                        {% endfor %}
+                    </select>
+                </div>
+                <div class="col-md-3">
+                    <label for="level" class="form-label">Niveau</label>
+                    <select name="level" id="level" class="form-select">
+                        <option value="">Tous</option>
+                        {% for level_code, level_name in log_levels.items %}
+                            <option value="{{ level_code }}" {% if request.GET.level == level_code %}selected{% endif %}>{{ level_name }}</option>
+                        {% endfor %}
+                    </select>
+                </div>
+                <div class="col-md-3">
+                    <label for="date_start" class="form-label">Date début</label>
+                    <input type="datetime-local" class="form-control" id="date_start" name="date_start" value="{{ request.GET.date_start }}">
+                </div>
+                <div class="col-md-3">
+                    <label for="date_end" class="form-label">Date fin</label>
+                    <input type="datetime-local" class="form-control" id="date_end" name="date_end" value="{{ request.GET.date_end }}">
+                </div>
+                <div class="col-md-9">
+                    <label for="search" class="form-label">Recherche</label>
+                    <input type="text" class="form-control" id="search" name="search" placeholder="Rechercher dans les messages..." value="{{ request.GET.search }}">
+                </div>
+                <div class="col-md-3 d-flex align-items-end">
+                    <button type="submit" class="btn btn-primary w-100">Filtrer</button>
+                </div>
+            </form>
+        </div>
+    </div>
+    
+    <div class="d-flex justify-content-end mb-3">
+        <button id="toggleRefresh" class="btn btn-primary me-2">
+            <i class="bi bi-arrow-clockwise"></i> Activer l'actualisation auto
+        </button>
+        <a href="{% url 'robot_logs:export_csv' %}?{% for key, value in request.GET.items %}{% if key != 'page' %}{{ key }}={{ value }}&{% endif %}{% endfor %}" class="btn btn-success">
+            <i class="bi bi-file-earmark-excel"></i> Exporter en CSV
+        </a>
+    </div>
+    
+    <div class="table-responsive">
+        <table class="table table-striped table-hover">
+            <thead>
+                <tr>
+                    <th>Date/Heure</th>
+                    <th>Robot ID</th>
+                    <th>Niveau</th>
+                    <th>Message</th>
+                    <th>Source</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for log in logs %}
+                    <tr class="log-{{ log.level|lower }}">
+                        <td>{{ log.timestamp|date:"Y-m-d H:i:s" }}</td>
+                        <td>{{ log.robot_id }}</td>
+                        <td>{{ log.level }}</td>
+                        <td>
+                            <a href="{% url 'robot_logs:log_detail' log.pk %}">
+                                {{ log.message|truncatechars:100 }}
+                            </a>
+                        </td>
+                        <td>{{ log.source }}</td>
+                    </tr>
+                {% empty %}
+                    <tr>
+                        <td colspan="5" class="text-center">Aucun log trouvé.</td>
+                    </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+    
+    {% if is_paginated %}
+    <nav aria-label="Pagination">
+        <ul class="pagination justify-content-center">
+            {% if page_obj.has_previous %}
+                <li class="page-item">
+                    <a class="page-link" href="?{% for key, value in request.GET.items %}{% if key != 'page' %}{{ key }}={{ value }}&{% endif %}{% endfor %}page=1">Première</a>
+                </li>
+                <li class="page-item">
+                    <a class="page-link" href="?{% for key, value in request.GET.items %}{% if key != 'page' %}{{ key }}={{ value }}&{% endif %}{% endfor %}page={{ page_obj.previous_page_number }}">Précédente</a>
+                </li>
+            {% else %}
+                <li class="page-item disabled">
+                    <span class="page-link">Première</span>
+                </li>
+                <li class="page-item disabled">
+                    <span class="page-link">Précédente</span>
+                </li>
+            {% endif %}
+            
+            {% for num in page_obj.paginator.page_range %}
+                {% if page_obj.number == num %}
+                    <li class="page-item active">
+                        <span class="page-link">{{ num }}</span>
+                    </li>
+                {% elif num > page_obj.number|add:'-3' and num < page_obj.number|add:'3' %}
+                    <li class="page-item">
+                        <a class="page-link" href="?{% for key, value in request.GET.items %}{% if key != 'page' %}{{ key }}={{ value }}&{% endif %}{% endfor %}page={{ num }}">{{ num }}</a>
+                    </li>
+                {% endif %}
+            {% endfor %}
+            
+            {% if page_obj.has_next %}
+                <li class="page-item">
+                    <a class="page-link" href="?{% for key, value in request.GET.items %}{% if key != 'page' %}{{ key }}={{ value }}&{% endif %}{% endfor %}page={{ page_obj.next_page_number }}">Suivante</a>
+                </li>
+                <li class="page-item">
+                    <a class="page-link" href="?{% for key, value in request.GET.items %}{% if key != 'page' %}{{ key }}={{ value }}&{% endif %}{% endfor %}page={{ page_obj.paginator.num_pages }}">Dernière</a>
+                </li>
+            {% else %}
+                <li class="page-item disabled">
+                    <span class="page-link">Suivante</span>
+                </li>
+                <li class="page-item disabled">
+                    <span class="page-link">Dernière</span>
+                </li>
+            {% endif %}
+        </ul>
+    </nav>
+    {% endif %}
+{% endblock %}
+
+{% block scripts %}
+<script>
+    $(document).ready(function() {
+        // Fonction pour appliquer la couleur de fond en fonction du niveau
+        function applyLogLevelColors() {
+            $('tr.log-debug').addClass('table-light');
+            $('tr.log-info').addClass('table-info');
+            $('tr.log-warning').addClass('table-warning');
+            $('tr.log-error').addClass('table-danger');
+            $('tr.log-critical').addClass('table-danger').css('font-weight', 'bold');
+        }
+        
+        applyLogLevelColors();
+        
+        // Rafraîchissement automatique des logs toutes les 60 secondes
+        let autoRefresh = false;
+        let refreshInterval;
+        
+        $('#toggleRefresh').click(function() {
+            autoRefresh = !autoRefresh;
+            if (autoRefresh) {
+                $(this).text('Désactiver l\'actualisation auto');
+                $(this).removeClass('btn-primary').addClass('btn-secondary');
+                refreshInterval = setInterval(function() {
+                    let currentUrl = window.location.href.split('?')[0];
+                    let queryParams = $('form').serialize();
+                    
+                    $.get(currentUrl + '?' + queryParams, function(data) {
+                        let newTable = $(data).find('table.table');
+                        $('table.table').html(newTable.html());
+                        applyLogLevelColors();
+                    });
+                }, 60000); // 60 secondes
+            } else {
+                $(this).text('Activer l\'actualisation auto');
+                $(this).removeClass('btn-secondary').addClass('btn-primary');
+                clearInterval(refreshInterval);
+            }
+        });
+        
+        // Ajout d'un effet lors du survol des lignes
+        $('table.table tbody tr').hover(
+            function() {
+                $(this).css('cursor', 'pointer');
+                $(this).addClass('table-active');
+            },
+            function() {
+                $(this).removeClass('table-active');
+            }
+        );
+        
+        // Redirection vers la page de détail au clic sur une ligne
+        $('table.table tbody tr').click(function() {
+            let logId = $(this).find('a').attr('href');
+            if (logId) {
+                window.location.href = logId;
+            }
+        });
+    });
+</script>
+{% endblock %}
