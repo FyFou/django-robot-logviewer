@@ -4,6 +4,7 @@ Fonctions utilitaires pour le parsing des fichiers MDF
 import logging
 import io
 import re
+import struct
 from datetime import datetime
 from PIL import Image
 import numpy as np
@@ -60,6 +61,26 @@ def is_image_data(channel_name, data):
         hasattr(data, '__len__') and len(data) > 1000):  # Au moins 1 Ko
         return True
         
+    return False
+
+def is_can_data(channel_name, data):
+    """Détermine si un canal contient des trames CAN"""
+    # Vérification par le nom du canal
+    if 'can' in channel_name.lower() or 'frame' in channel_name.lower() or 'msg' in channel_name.lower():
+        return True
+    
+    # Vérification par le type de données (souvent des structures ou des tableaux d'octets)
+    if hasattr(data, 'dtype') and data.dtype.kind in ['V', 'O']:  # V pour les types structurés, O pour les objets
+        return True
+        
+    # Cas spécial pour des tableaux de bytes qui pourraient être des trames CAN
+    if (hasattr(data, 'dtype') and 
+        data.dtype.kind == 'u' and 
+        hasattr(data, 'shape') and 
+        len(data.shape) > 1 and 
+        data.shape[1] in [8, 16]):  # Les trames CAN ont généralement 8 ou 16 octets de données
+        return True
+    
     return False
 
 def process_text_event(channel_name, data, timestamps, unit='', description=''):
@@ -316,6 +337,112 @@ def process_image_data(channel_name, data, timestamps, unit='', description=''):
         main_log.set_metadata_from_dict(metadata)
         
         return main_log, None
+
+def process_can_data(channel_name, data, timestamps, unit='', description=''):
+    """Traite un canal comme des trames CAN"""
+    # Créer un log principal pour ces données CAN
+    main_log = RobotLog(
+        timestamp=datetime.fromtimestamp(timestamps[0]),
+        robot_id="MDF_Import",
+        level="INFO",
+        message=f"Données CAN pour {channel_name}",
+        source="MDF Import",
+        log_type="TEXT"  # Utilisez TEXT par défaut ou ajoutez un nouveau type CAN dans le modèle
+    )
+    
+    # Traiter et formatter les données CAN en un format lisible
+    can_logs = []
+    
+    # Convertir les timestamps en datetime
+    timestamps_dt = [datetime.fromtimestamp(ts) for ts in timestamps]
+    
+    # Analysons les 5 premières trames CAN pour déterminer la structure
+    for i, (ts, frame) in enumerate(zip(timestamps_dt[:min(5, len(timestamps_dt))], data[:min(5, len(data))])):
+        try:
+            # Essayer différentes méthodes pour extraire les informations de la trame CAN
+            frame_data = extract_can_frame_data(frame)
+            
+            # Créer un log pour chaque trame CAN
+            log = RobotLog(
+                timestamp=ts,
+                robot_id="MDF_Import",
+                level="INFO",
+                message=f"CAN Frame: {frame_data}",
+                source=f"CAN Import: {channel_name}",
+                log_type="TEXT"
+            )
+            
+            # Stocker les détails dans les métadonnées
+            metadata = {
+                'channel_name': channel_name,
+                'can_frame': frame_data,
+                'sample_index': i,
+            }
+            log.set_metadata_from_dict(metadata)
+            can_logs.append(log)
+        except Exception as e:
+            logger.warning(f"Impossible d'interpréter la trame CAN: {e}")
+    
+    # Ajouter des métadonnées au log principal
+    metadata = {
+        'channel_name': channel_name,
+        'frames_count': len(data),
+        'unit': unit,
+        'description': description,
+        'start_time': timestamps[0],
+        'end_time': timestamps[-1],
+        'duration': timestamps[-1] - timestamps[0],
+    }
+    main_log.set_metadata_from_dict(metadata)
+    
+    # Ajouter le log principal à la liste des logs
+    can_logs.insert(0, main_log)
+    
+    return can_logs, [], [], []
+
+def extract_can_frame_data(frame):
+    """Extrait les informations d'une trame CAN"""
+    # Plusieurs formats possibles pour les trames CAN, essayons de les détecter
+    frame_info = {}
+    
+    try:
+        # Si c'est un tableau structuré NumPy ou un type composé
+        if hasattr(frame, 'dtype') and frame.dtype.kind == 'V':
+            # Essayer d'extraire les champs
+            for field_name in frame.dtype.names:
+                frame_info[field_name] = frame[field_name]
+            return frame_info
+        
+        # Si c'est un tableau d'octets
+        elif hasattr(frame, 'tobytes'):
+            # Format possible: [ID (4 bytes), DLC (1 byte), Data (8 bytes), ...]
+            bytes_data = frame.tobytes()
+            if len(bytes_data) >= 13:  # Taille minimale pour un format typique
+                can_id = struct.unpack("<I", bytes_data[0:4])[0]
+                dlc = bytes_data[4]
+                data = bytes_data[5:5+dlc]
+                
+                frame_info = {
+                    'ID': f"0x{can_id:X}",
+                    'DLC': dlc,
+                    'Data': ' '.join([f"{b:02X}" for b in data])
+                }
+                return frame_info
+        
+        # Si c'est un objet avec des attributs spécifiques
+        elif hasattr(frame, 'id') and hasattr(frame, 'data'):
+            frame_info = {
+                'ID': f"0x{frame.id:X}" if isinstance(frame.id, int) else str(frame.id),
+                'Data': ' '.join([f"{b:02X}" for b in frame.data]) if hasattr(frame.data, '__iter__') else str(frame.data)
+            }
+            if hasattr(frame, 'dlc'):
+                frame_info['DLC'] = frame.dlc
+            return frame_info
+    except Exception as e:
+        logger.debug(f"Erreur lors de l'extraction des données CAN: {e}")
+    
+    # Si tout échoue, convertir en chaîne de caractères
+    return str(frame)
 
 def sanitize_filename(filename):
     """Remplace les caractères potentiellement problématiques dans les noms de fichiers"""
