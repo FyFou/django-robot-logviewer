@@ -1,26 +1,27 @@
 """
-Module pour parser les fichiers MDF (Measurement Data Format) de Vector.
-Version corrigée pour gérer les canaux dupliqués dans les fichiers MDF.
+Module pour parser les fichiers MDF (Measurement Data Format) pour l'application django-robot-logviewer.
+Cette version utilise la bibliothèque mdfreader pour un parsing plus robuste des fichiers MDF.
 """
 import os
 import json
 import tempfile
 from datetime import datetime
 import numpy as np
-from asammdf import MDF
 import logging
 from PIL import Image
 import io
+import traceback
 
 from django.conf import settings
 from django.core.files.base import ContentFile
 
+from mdfreader import Mdf
 from .models import RobotLog, CurveMeasurement, Laser2DScan, ImageData, MDFFile
 
 logger = logging.getLogger(__name__)
 
 class MDFParser:
-    """Classe pour parser et traiter les fichiers MDF"""
+    """Classe pour parser et traiter les fichiers MDF en utilisant mdfreader"""
     
     def __init__(self, file_path, mdf_file_obj=None):
         """
@@ -35,22 +36,28 @@ class MDFParser:
         self._mdf = None
         
     def open(self):
-        """Ouvre le fichier MDF"""
+        """Ouvre le fichier MDF avec mdfreader"""
         try:
-            self._mdf = MDF(self.file_path)
+            # No_data_loading=True pour éviter de charger toutes les données en mémoire
+            # On va juste lire les métadonnées
+            self._mdf = Mdf(self.file_path, no_data_loading=True)
+            
             if self.mdf_file:
-                self.mdf_file.mdf_version = f"MDF {self._mdf.version}"
+                self.mdf_file.mdf_version = f"MDF {self._mdf.MDFVersionNumber}"
                 self.mdf_file.save()
+            
+            logger.info(f"Fichier MDF ouvert avec succès: {self.file_path}")
             return True
         except Exception as e:
-            logger.error(f"Erreur lors de l'ouverture du fichier MDF: {e}")
+            logger.error(f"Erreur lors de l'ouverture du fichier MDF: {str(e)}")
+            logger.error(traceback.format_exc())
             return False
     
     def close(self):
         """Ferme le fichier MDF"""
         if self._mdf:
-            self._mdf.close()
             self._mdf = None
+            logger.info("Fichier MDF fermé")
     
     def get_channels(self):
         """Retourne la liste des canaux disponibles dans le fichier MDF"""
@@ -58,35 +65,17 @@ class MDFParser:
             if not self.open():
                 return []
         
-        # Filtrer les canaux dupliqués pour n'avoir que les noms uniques
-        unique_channels = []
-        seen_channels = set()
+        # Récupérer tous les canaux disponibles
+        channels = []
         
-        for channel_name in self._mdf.channels_db.keys():
-            # Ignorer les canaux de temps pour éviter les erreurs
-            if channel_name.lower() in ('time', 'timestamp'):
-                continue
-            
-            if channel_name not in seen_channels:
-                unique_channels.append(channel_name)
-                seen_channels.add(channel_name)
+        # Parcourir les masterlists pour obtenir tous les canaux
+        for master in self._mdf.masterChannelList:
+            for channel in self._mdf.masterChannelList[master]:
+                if channel not in channels:
+                    channels.append(channel)
         
-        return unique_channels
-    
-    def _find_channel_location(self, channel_name):
-        """
-        Trouve la localisation (groupe, index) d'un canal dans le fichier MDF.
-        
-        Args:
-            channel_name: Nom du canal à trouver
-            
-        Returns:
-            Tuple (group, index) ou None si non trouvé
-        """
-        if channel_name in self._mdf.channels_db:
-            # Prendre la première occurrence du canal
-            return self._mdf.channels_db[channel_name][0]
-        return None
+        logger.info(f"Nombre de canaux trouvés: {len(channels)}")
+        return channels
     
     def get_channel_info(self, channel_name):
         """Retourne les informations sur un canal spécifique"""
@@ -95,85 +84,82 @@ class MDFParser:
                 return None
                 
         try:
-            # Trouver la localisation correcte du canal
-            location = self._find_channel_location(channel_name)
-            if location:
-                group, index = location
-                signal = self._mdf.get(channel_name, group=group, index=index)
-                return {
-                    'name': channel_name,
-                    'unit': signal.unit if hasattr(signal, 'unit') else '',
-                    'comment': signal.comment if hasattr(signal, 'comment') else '',
-                    'samples_count': len(signal.samples) if hasattr(signal, 'samples') else 0,
-                    'data_type': str(signal.samples.dtype) if hasattr(signal, 'samples') else '',
-                }
-            else:
-                logger.error(f"Canal {channel_name} non trouvé dans le fichier MDF")
-                return None
+            # Charger les données du canal pour obtenir les infos
+            data = self._mdf.get_channel_data(channel_name)
+            
+            # Obtenir les informations du canal
+            unit = self._mdf.get_channel_unit(channel_name)
+            description = self._mdf.get_channel_desc(channel_name)
+            
+            return {
+                'name': channel_name,
+                'unit': unit if unit else '',
+                'comment': description if description else '',
+                'samples_count': len(data) if data is not None else 0,
+                'data_type': str(data.dtype) if data is not None else '',
+            }
         except Exception as e:
-            logger.error(f"Erreur lors de la récupération des infos du canal {channel_name}: {e}")
+            logger.error(f"Erreur lors de la récupération des infos du canal {channel_name}: {str(e)}")
+            logger.error(traceback.format_exc())
             return None
     
-    def _is_text_event(self, channel_name, signal):
+    def _is_text_event(self, channel_name, data):
         """Détermine si un canal contient des événements textuels"""
-        # Logique pour détecter un canal d'événements textuels
-        # Par exemple, vérifie si le canal contient des chaînes ou si son nom suggère un événement
-        if 'event' in channel_name.lower() or 'message' in channel_name.lower():
+        # Vérification par le nom du canal
+        if 'event' in channel_name.lower() or 'message' in channel_name.lower() or 'text' in channel_name.lower():
             return True
         
-        # Vérifie le type de données
-        if hasattr(signal, 'samples') and signal.samples.dtype.kind in ['S', 'U']:
+        # Vérification par le type de données
+        if hasattr(data, 'dtype') and data.dtype.kind in ['S', 'U']:
             return True
             
         return False
     
-    def _is_curve_data(self, channel_name, signal):
+    def _is_curve_data(self, channel_name, data):
         """Détermine si un canal contient des données de courbe"""
-        # Vérifie si c'est une série de valeurs numériques
-        if (hasattr(signal, 'samples') and 
-            signal.samples.dtype.kind in ['i', 'u', 'f'] and 
-            len(signal.samples) > 1):
+        # Vérification si c'est une série de valeurs numériques
+        if (hasattr(data, 'dtype') and 
+            data.dtype.kind in ['i', 'u', 'f'] and 
+            hasattr(data, '__len__') and len(data) > 1):
             return True
             
         return False
     
-    def _is_laser_data(self, channel_name, signal):
+    def _is_laser_data(self, channel_name, data):
         """Détermine si un canal contient des données laser 2D"""
-        # Logique pour détecter un canal de données laser
-        # Par exemple, vérifie si le nom du canal contient des mots-clés comme "laser" ou "scan"
+        # Vérification par le nom du canal
         if 'laser' in channel_name.lower() or 'scan' in channel_name.lower() or 'lidar' in channel_name.lower():
-            # Vérifie également si les données ressemblent à un scan laser (tableau de distances)
-            if (hasattr(signal, 'samples') and 
-                signal.samples.dtype.kind in ['i', 'u', 'f'] and 
-                len(signal.samples) > 10):
+            # Vérification des données (tableau de distances)
+            if (hasattr(data, 'dtype') and 
+                data.dtype.kind in ['i', 'u', 'f'] and 
+                hasattr(data, '__len__') and len(data) > 10):
                 return True
                 
         return False
     
-    def _is_image_data(self, channel_name, signal):
+    def _is_image_data(self, channel_name, data):
         """Détermine si un canal contient des données d'image"""
-        # Logique pour détecter un canal d'image
+        # Vérification par le nom du canal
         if 'image' in channel_name.lower() or 'camera' in channel_name.lower() or 'photo' in channel_name.lower():
             return True
             
-        # Vérifier si c'est un tableau d'octets assez grand pour être une image
-        if (hasattr(signal, 'samples') and 
-            signal.samples.dtype.kind == 'u' and 
-            signal.samples.dtype.itemsize == 1 and
-            len(signal.samples) > 1000):  # Disons qu'une image fait au moins 1 Ko
+        # Vérification par le type et la taille des données
+        if (hasattr(data, 'dtype') and 
+            data.dtype.kind == 'u' and 
+            hasattr(data, '__len__') and len(data) > 1000):  # Au moins 1 Ko
             return True
             
         return False
     
-    def _process_text_event(self, channel_name, signal):
+    def _process_text_event(self, channel_name, data, timestamps):
         """Traite un canal comme un événement textuel et crée des logs"""
         logs = []
         
         # Convertir les timestamps en datetime
-        timestamps = [datetime.fromtimestamp(ts) for ts in signal.timestamps]
+        timestamps_dt = [datetime.fromtimestamp(ts) for ts in timestamps]
         
         # Traiter chaque échantillon
-        for i, (ts, value) in enumerate(zip(timestamps, signal.samples)):
+        for i, (ts, value) in enumerate(zip(timestamps_dt, data)):
             # Convertir la valeur en chaîne si nécessaire
             if isinstance(value, (bytes, bytearray)):
                 try:
@@ -185,8 +171,8 @@ class MDFParser:
                 
             log = RobotLog(
                 timestamp=ts,
-                robot_id="MDF_Import",  # À adapter selon les métadonnées
-                level="INFO",  # Niveau par défaut
+                robot_id="MDF_Import",
+                level="INFO",
                 message=f"{channel_name}: {value}",
                 source="MDF Import",
                 log_type="TEXT"
@@ -196,8 +182,8 @@ class MDFParser:
             metadata = {
                 'channel_name': channel_name,
                 'sample_index': i,
-                'unit': signal.unit if hasattr(signal, 'unit') else None,
-                'comment': signal.comment if hasattr(signal, 'comment') else None,
+                'unit': self._mdf.get_channel_unit(channel_name),
+                'description': self._mdf.get_channel_desc(channel_name),
             }
             log.set_metadata_from_dict(metadata)
             
@@ -205,11 +191,11 @@ class MDFParser:
             
         return logs
     
-    def _process_curve_data(self, channel_name, signal):
+    def _process_curve_data(self, channel_name, data, timestamps):
         """Traite un canal comme des données de courbe"""
         # Créer un log principal pour cette courbe
         main_log = RobotLog(
-            timestamp=datetime.fromtimestamp(signal.timestamps[0]),
+            timestamp=datetime.fromtimestamp(timestamps[0]),
             robot_id="MDF_Import",
             level="INFO",
             message=f"Données de courbe pour {channel_name}",
@@ -220,11 +206,11 @@ class MDFParser:
         # Ajouter des métadonnées
         metadata = {
             'channel_name': channel_name,
-            'samples_count': len(signal.samples),
-            'unit': signal.unit if hasattr(signal, 'unit') else None,
-            'start_time': signal.timestamps[0],
-            'end_time': signal.timestamps[-1],
-            'duration': signal.timestamps[-1] - signal.timestamps[0],
+            'samples_count': len(data),
+            'unit': self._mdf.get_channel_unit(channel_name),
+            'start_time': timestamps[0],
+            'end_time': timestamps[-1],
+            'duration': timestamps[-1] - timestamps[0],
         }
         main_log.set_metadata_from_dict(metadata)
         
@@ -232,10 +218,10 @@ class MDFParser:
         try:
             import matplotlib.pyplot as plt
             plt.figure(figsize=(10, 6))
-            plt.plot(signal.timestamps, signal.samples)
+            plt.plot(timestamps, data)
             plt.title(f"Courbe: {channel_name}")
             plt.xlabel("Temps (s)")
-            plt.ylabel(signal.unit if hasattr(signal, 'unit') else "Valeur")
+            plt.ylabel(self._mdf.get_channel_unit(channel_name) or "Valeur")
             plt.grid(True)
             
             # Sauvegarder l'image dans un buffer
@@ -251,25 +237,26 @@ class MDFParser:
                 save=False
             )
         except Exception as e:
-            logger.error(f"Erreur lors de la génération du graphique pour {channel_name}: {e}")
+            logger.error(f"Erreur lors de la génération du graphique pour {channel_name}: {str(e)}")
+            logger.error(traceback.format_exc())
         
         # Créer les mesures de courbe associées
         curve_measurements = []
-        for i, (ts, value) in enumerate(zip(signal.timestamps, signal.samples)):
+        for i, (ts, value) in enumerate(zip(timestamps, data)):
             measurement = CurveMeasurement(
                 timestamp=datetime.fromtimestamp(ts),
                 sensor_name=channel_name,
-                value=float(value)
+                value=float(value) if hasattr(value, 'dtype') else float(value)
             )
             curve_measurements.append(measurement)
         
         return main_log, curve_measurements
     
-    def _process_laser_data(self, channel_name, signal):
+    def _process_laser_data(self, channel_name, data, timestamps):
         """Traite un canal comme des données laser 2D"""
         # Créer un log principal pour ces données laser
         main_log = RobotLog(
-            timestamp=datetime.fromtimestamp(signal.timestamps[0]),
+            timestamp=datetime.fromtimestamp(timestamps[0]),
             robot_id="MDF_Import",
             level="INFO",
             message=f"Données laser 2D pour {channel_name}",
@@ -277,17 +264,16 @@ class MDFParser:
             log_type="LASER2D"
         )
         
-        # Estimer les paramètres du laser
-        # Ceci est une estimation - les vrais paramètres devraient être dans les métadonnées du MDF
-        angle_min = -np.pi / 2  # Par défaut, supposons un scan de 180 degrés
+        # Estimer les paramètres du laser (par défaut)
+        angle_min = -np.pi / 2  # Par défaut, scan de 180 degrés
         angle_max = np.pi / 2
-        angle_increment = np.pi / len(signal.samples)
+        angle_increment = np.pi / len(data)
         
         # Ajouter des métadonnées
         metadata = {
             'channel_name': channel_name,
-            'points_count': len(signal.samples),
-            'unit': signal.unit if hasattr(signal, 'unit') else 'm',
+            'points_count': len(data),
+            'unit': self._mdf.get_channel_unit(channel_name) or 'm',
             'angle_min': angle_min,
             'angle_max': angle_max,
             'angle_increment': angle_increment,
@@ -296,14 +282,14 @@ class MDFParser:
         
         # Créer l'objet de scan laser
         laser_scan = Laser2DScan(
-            timestamp=datetime.fromtimestamp(signal.timestamps[0]),
+            timestamp=datetime.fromtimestamp(timestamps[0]),
             angle_min=angle_min,
             angle_max=angle_max,
             angle_increment=angle_increment
         )
         
         # Convertir les données de plage en liste et les stocker
-        range_data = signal.samples.tolist()
+        range_data = data.tolist() if hasattr(data, 'tolist') else list(data)
         laser_scan.set_range_data_from_list(range_data)
         
         # Générer une visualisation du scan laser
@@ -335,15 +321,16 @@ class MDFParser:
                 save=False
             )
         except Exception as e:
-            logger.error(f"Erreur lors de la génération de la visualisation laser pour {channel_name}: {e}")
+            logger.error(f"Erreur lors de la génération de la visualisation laser pour {channel_name}: {str(e)}")
+            logger.error(traceback.format_exc())
         
         return main_log, laser_scan
     
-    def _process_image_data(self, channel_name, signal):
+    def _process_image_data(self, channel_name, data, timestamps):
         """Traite un canal comme des données d'image"""
         # Créer un log principal pour cette image
         main_log = RobotLog(
-            timestamp=datetime.fromtimestamp(signal.timestamps[0]),
+            timestamp=datetime.fromtimestamp(timestamps[0]),
             robot_id="MDF_Import",
             level="INFO",
             message=f"Image pour {channel_name}",
@@ -354,14 +341,14 @@ class MDFParser:
         # Essayer de déterminer le type d'image et de la décoder
         try:
             # Convertir les données en tableau d'octets
-            image_data = signal.samples.tobytes()
+            image_data = data.tobytes() if hasattr(data, 'tobytes') else bytes(data)
             
             # Essayer de créer une image à partir des données
             img = Image.open(io.BytesIO(image_data))
             
             # Créer l'objet ImageData
             image_obj = ImageData(
-                timestamp=datetime.fromtimestamp(signal.timestamps[0]),
+                timestamp=datetime.fromtimestamp(timestamps[0]),
                 width=img.width,
                 height=img.height,
                 format=img.format if img.format else 'JPEG',
@@ -390,12 +377,13 @@ class MDFParser:
             return main_log, image_obj
             
         except Exception as e:
-            logger.error(f"Erreur lors du traitement de l'image pour {channel_name}: {e}")
+            logger.error(f"Erreur lors du traitement de l'image pour {channel_name}: {str(e)}")
+            logger.error(traceback.format_exc())
             
             # En cas d'échec, créer une entrée de journal simple
             metadata = {
                 'channel_name': channel_name,
-                'data_size': len(signal.samples),
+                'data_size': len(data),
                 'error': str(e)
             }
             main_log.set_metadata_from_dict(metadata)
@@ -417,45 +405,54 @@ class MDFParser:
                 return [], [], [], []
         
         try:
-            # Trouver la localisation correcte du canal
-            location = self._find_channel_location(channel_name)
-            if not location:
-                logger.error(f"Canal {channel_name} non trouvé dans le fichier MDF")
-                # Créer un log d'erreur
+            # Récupérer les données du canal
+            data = self._mdf.get_channel_data(channel_name)
+            
+            # Si aucune donnée n'est disponible
+            if data is None or (hasattr(data, '__len__') and len(data) == 0):
+                logger.error(f"Canal {channel_name} sans données")
                 error_log = RobotLog(
                     timestamp=datetime.now(),
                     robot_id="MDF_Import",
                     level="ERROR",
-                    message=f"Canal {channel_name} non trouvé dans le fichier MDF",
+                    message=f"Canal {channel_name} sans données",
                     source="MDF Import",
                     log_type="TEXT"
                 )
                 return [error_log], [], [], []
             
-            group, index = location
-            signal = self._mdf.get(channel_name, group=group, index=index)
+            # Récupérer les timestamps du canal
+            master_name = self._mdf.get_channel_master(channel_name)
+            if master_name:
+                timestamps = self._mdf.get_channel_data(master_name)
+            else:
+                # Si pas de master channel, créer des timestamps artificiels
+                timestamps = np.arange(len(data))
             
             # Déterminer le type de données
-            if self._is_text_event(channel_name, signal):
-                logs = self._process_text_event(channel_name, signal)
+            if self._is_text_event(channel_name, data):
+                logs = self._process_text_event(channel_name, data, timestamps)
                 return logs, [], [], []
                 
-            elif self._is_curve_data(channel_name, signal):
-                main_log, curve_measurements = self._process_curve_data(channel_name, signal)
+            elif self._is_curve_data(channel_name, data):
+                main_log, curve_measurements = self._process_curve_data(channel_name, data, timestamps)
                 return [main_log], curve_measurements, [], []
                 
-            elif self._is_laser_data(channel_name, signal):
-                main_log, laser_scan = self._process_laser_data(channel_name, signal)
+            elif self._is_laser_data(channel_name, data):
+                main_log, laser_scan = self._process_laser_data(channel_name, data, timestamps)
                 return [main_log], [], [laser_scan], []
                 
-            elif self._is_image_data(channel_name, signal):
-                main_log, image = self._process_image_data(channel_name, signal)
-                return [main_log], [], [], [image] if image else []
+            elif self._is_image_data(channel_name, data):
+                main_log, image = self._process_image_data(channel_name, data, timestamps)
+                if image:
+                    return [main_log], [], [], [image]
+                else:
+                    return [main_log], [], [], []
                 
             else:
                 # Canal non reconnu, créer un log simple
                 log = RobotLog(
-                    timestamp=datetime.fromtimestamp(signal.timestamps[0]),
+                    timestamp=datetime.fromtimestamp(timestamps[0]),
                     robot_id="MDF_Import",
                     level="INFO",
                     message=f"Données non classifiées pour {channel_name}",
@@ -466,22 +463,24 @@ class MDFParser:
                 # Ajouter des métadonnées
                 metadata = {
                     'channel_name': channel_name,
-                    'samples_count': len(signal.samples),
-                    'data_type': str(signal.samples.dtype),
-                    'unit': signal.unit if hasattr(signal, 'unit') else None,
+                    'samples_count': len(data),
+                    'data_type': str(data.dtype) if hasattr(data, 'dtype') else str(type(data)),
+                    'unit': self._mdf.get_channel_unit(channel_name),
                 }
                 log.set_metadata_from_dict(metadata)
                 
                 return [log], [], [], []
                 
         except Exception as e:
-            logger.error(f"Erreur lors du traitement du canal {channel_name}: {e}")
+            logger.error(f"Erreur lors du traitement du canal {channel_name}: {str(e)}")
+            logger.error(traceback.format_exc())
+            
             # Créer un log d'erreur
             error_log = RobotLog(
                 timestamp=datetime.now(),
                 robot_id="MDF_Import",
                 level="ERROR",
-                message=f"Erreur lors du traitement du canal {channel_name}: {e}",
+                message=f"Erreur lors du traitement du canal {channel_name}: {str(e)}",
                 source="MDF Import",
                 log_type="TEXT"
             )
@@ -508,12 +507,13 @@ class MDFParser:
             'errors': 0
         }
         
-        # Récupérer tous les canaux (version améliorée qui filtre les canaux de temps)
+        # Récupérer tous les canaux
         channels = self.get_channels()
         statistics['total_channels'] = len(channels)
         
         # Traiter chaque canal
         for channel_name in channels:
+            logger.info(f"Traitement du canal: {channel_name}")
             logs, curve_measurements, laser_scans, images = self.process_channel(channel_name)
             
             # Sauvegarder les logs
@@ -548,7 +548,8 @@ class MDFParser:
                         statistics['text_logs'] += 1
                         
                 except Exception as e:
-                    logger.error(f"Erreur lors de la sauvegarde des données pour {channel_name}: {e}")
+                    logger.error(f"Erreur lors de la sauvegarde des données pour {channel_name}: {str(e)}")
+                    logger.error(traceback.format_exc())
                     statistics['errors'] += 1
         
         # Marquer le fichier MDF comme traité
