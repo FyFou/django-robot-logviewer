@@ -73,6 +73,21 @@ class MDFParser:
         
         return unique_channels
     
+    def _find_channel_location(self, channel_name):
+        """
+        Trouve la localisation (groupe, index) d'un canal dans le fichier MDF.
+        
+        Args:
+            channel_name: Nom du canal à trouver
+            
+        Returns:
+            Tuple (group, index) ou None si non trouvé
+        """
+        if channel_name in self._mdf.channels_db:
+            # Prendre la première occurrence du canal
+            return self._mdf.channels_db[channel_name][0]
+        return None
+    
     def get_channel_info(self, channel_name):
         """Retourne les informations sur un canal spécifique"""
         if not self._mdf:
@@ -80,16 +95,21 @@ class MDFParser:
                 return None
                 
         try:
-            # CORRECTION: Spécifier group=0, index=0 pour éviter les erreurs avec les canaux dupliqués
-            # Cela va toujours prendre la première occurrence du canal
-            signal = self._mdf.get(channel_name, group=0, index=0)
-            return {
-                'name': channel_name,
-                'unit': signal.unit if hasattr(signal, 'unit') else '',
-                'comment': signal.comment if hasattr(signal, 'comment') else '',
-                'samples_count': len(signal.samples) if hasattr(signal, 'samples') else 0,
-                'data_type': str(signal.samples.dtype) if hasattr(signal, 'samples') else '',
-            }
+            # Trouver la localisation correcte du canal
+            location = self._find_channel_location(channel_name)
+            if location:
+                group, index = location
+                signal = self._mdf.get(channel_name, group=group, index=index)
+                return {
+                    'name': channel_name,
+                    'unit': signal.unit if hasattr(signal, 'unit') else '',
+                    'comment': signal.comment if hasattr(signal, 'comment') else '',
+                    'samples_count': len(signal.samples) if hasattr(signal, 'samples') else 0,
+                    'data_type': str(signal.samples.dtype) if hasattr(signal, 'samples') else '',
+                }
+            else:
+                logger.error(f"Canal {channel_name} non trouvé dans le fichier MDF")
+                return None
         except Exception as e:
             logger.error(f"Erreur lors de la récupération des infos du canal {channel_name}: {e}")
             return None
@@ -397,9 +417,23 @@ class MDFParser:
                 return [], [], [], []
         
         try:
-            # CORRECTION: Obtenir le signal avec group=0, index=0
-            # Cela va toujours prendre la première occurrence du canal
-            signal = self._mdf.get(channel_name, group=0, index=0)
+            # Trouver la localisation correcte du canal
+            location = self._find_channel_location(channel_name)
+            if not location:
+                logger.error(f"Canal {channel_name} non trouvé dans le fichier MDF")
+                # Créer un log d'erreur
+                error_log = RobotLog(
+                    timestamp=datetime.now(),
+                    robot_id="MDF_Import",
+                    level="ERROR",
+                    message=f"Canal {channel_name} non trouvé dans le fichier MDF",
+                    source="MDF Import",
+                    log_type="TEXT"
+                )
+                return [error_log], [], [], []
+            
+            group, index = location
+            signal = self._mdf.get(channel_name, group=group, index=index)
             
             # Déterminer le type de données
             if self._is_text_event(channel_name, signal):
