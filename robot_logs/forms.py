@@ -28,6 +28,17 @@ class MDFImportForm(forms.ModelForm):
         """Valide le fichier MDF"""
         file = self.cleaned_data.get('file')
         
+        # Vérifier que le fichier existe
+        if not file:
+            raise forms.ValidationError("Aucun fichier n'a été sélectionné.")
+        
+        # Vérifier la taille du fichier
+        if file.size == 0:
+            raise forms.ValidationError("Le fichier soumis est vide.")
+            
+        # Afficher des informations de débogage sur le fichier
+        print(f"Fichier soumis: {file.name}, taille: {file.size} octets")
+        
         # Vérifier l'extension
         if file and not (file.name.lower().endswith('.mdf') or file.name.lower().endswith('.mf4')):
             raise forms.ValidationError("Le fichier doit être au format MDF (.mdf ou .mf4)")
