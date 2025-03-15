@@ -107,3 +107,26 @@ class MDFFile(models.Model):
     
     def __str__(self):
         return self.name
+
+class DBCFile(models.Model):
+    """Modèle pour stocker les fichiers DBC (Database CAN)"""
+    file = models.FileField(upload_to='dbc_files/')
+    name = models.CharField(max_length=255)
+    description = models.TextField(blank=True, null=True)
+    uploaded_at = models.DateTimeField(auto_now_add=True)
+    
+    def __str__(self):
+        return self.name
+
+class CANMapping(models.Model):
+    """Modèle pour associer des canaux CAN dans des fichiers MDF avec des fichiers DBC"""
+    mdf_file = models.ForeignKey(MDFFile, on_delete=models.CASCADE, related_name='can_mappings')
+    channel_name = models.CharField(max_length=255, help_text="Nom du canal CAN dans le fichier MDF")
+    dbc_file = models.ForeignKey(DBCFile, on_delete=models.SET_NULL, null=True, related_name='can_mappings')
+    created_at = models.DateTimeField(auto_now_add=True)
+    
+    class Meta:
+        unique_together = ('mdf_file', 'channel_name')
+        
+    def __str__(self):
+        return f"{self.channel_name} dans {self.mdf_file.name} -> {self.dbc_file.name if self.dbc_file else 'Aucun DBC'}"
