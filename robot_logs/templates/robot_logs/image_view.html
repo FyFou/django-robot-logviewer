@@ -1,0 +1,100 @@
+{% extends 'robot_logs/base.html' %}
+
+{% block title %}Image - LogViewer{% endblock %}
+
+{% block content %}
+<div class="d-flex justify-content-between align-items-center mb-3">
+    <h1>Visualisation d'image</h1>
+    <a href="{% url 'robot_logs:log_detail' log.id %}" class="btn btn-primary">Retour au détail</a>
+</div>
+
+<div class="card mb-4">
+    <div class="card-header">
+        <div class="row">
+            <div class="col-md-6">
+                <strong>Date/Heure:</strong> {{ log.timestamp|date:"Y-m-d H:i:s" }}
+            </div>
+            <div class="col-md-6">
+                <strong>Robot ID:</strong> {{ log.robot_id }}
+            </div>
+        </div>
+    </div>
+    <div class="card-body">
+        <h5>{{ log.message }}</h5>
+        <p><strong>Source:</strong> {{ log.source }}</p>
+        
+        {% if metadata %}
+        <div class="mb-3">
+            <strong>Informations sur l'image:</strong>
+            <ul>
+                <li><strong>Nom du canal:</strong> {{ metadata.channel_name|default:"Non spécifié" }}</li>
+                <li><strong>Format:</strong> {{ image.format }}</li>
+                <li><strong>Dimensions:</strong> {{ image.width }} x {{ image.height }} pixels</li>
+                {% if image.description %}
+                <li><strong>Description:</strong> {{ image.description }}</li>
+                {% endif %}
+            </ul>
+        </div>
+        {% endif %}
+        
+        <div class="text-center">
+            <div class="img-container" style="max-width: 100%; overflow: auto;">
+                <img src="{{ image.image_file.url }}" alt="Image" class="img-fluid" 
+                     style="max-height: 70vh; border: 1px solid #ddd; box-shadow: 0 0 10px rgba(0,0,0,0.1);">
+            </div>
+            
+            <div class="mt-3">
+                <a href="{{ image.image_file.url }}" class="btn btn-outline-primary" download>
+                    <i class="bi bi-download"></i> Télécharger l'image
+                </a>
+            </div>
+        </div>
+    </div>
+</div>
+
+{% if log.data_file %}
+<div class="card mt-4">
+    <div class="card-header">
+        Prévisualisation associée
+    </div>
+    <div class="card-body text-center">
+        <img src="{{ log.data_file.url }}" alt="Prévisualisation" class="img-fluid" 
+             style="max-height: 30vh; border: 1px solid #ddd;">
+    </div>
+</div>
+{% endif %}
+
+{% endblock %}
+
+{% block scripts %}
+<script>
+    // Script pour zoom sur l'image
+    document.addEventListener('DOMContentLoaded', function() {
+        const image = document.querySelector('.img-container img');
+        let scale = 1;
+        const maxScale = 3;
+        const minScale = 0.5;
+        
+        // Zoom avec la molette de souris
+        image.addEventListener('wheel', function(e) {
+            e.preventDefault();
+            
+            const direction = e.deltaY < 0 ? 1 : -1;
+            scale += direction * 0.1;
+            
+            // Limiter le zoom
+            scale = Math.min(maxScale, Math.max(minScale, scale));
+            
+            // Appliquer le zoom
+            image.style.transform = `scale(${scale})`;
+        });
+        
+        // Double-clic pour réinitialiser le zoom
+        image.addEventListener('dblclick', function(e) {
+            e.preventDefault();
+            scale = 1;
+            image.style.transform = `scale(${scale})`;
+        });
+    });
+</script>
+{% endblock %}
