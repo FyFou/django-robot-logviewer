@@ -1,0 +1,306 @@
+{% extends 'robot_logs/base.html' %}
+{% load static %}
+
+{% block title %}Données CAN | LogViewer{% endblock %}
+
+{% block head_extra %}
+<style>
+    .chart-container {
+        position: relative;
+        height: 400px;
+        width: 100%;
+    }
+    .can-message {
+        border-left: 4px solid #007bff;
+        margin-bottom: 10px;
+        padding: 8px;
+        background-color: #f8f9fa;
+    }
+    .signal-value {
+        font-family: monospace;
+        padding: 2px 4px;
+        background-color: #e9ecef;
+        border-radius: 3px;
+    }
+    .id-filter {
+        margin-bottom: 5px;
+    }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="container-fluid mt-4">
+    <div class="row">
+        <div class="col-12">
+            <nav aria-label="breadcrumb">
+                <ol class="breadcrumb">
+                    <li class="breadcrumb-item"><a href="{% url 'robot_logs:log_list' %}">Accueil</a></li>
+                    <li class="breadcrumb-item"><a href="{% url 'robot_logs:log_detail' log.id %}">Log #{{ log.id }}</a></li>
+                    <li class="breadcrumb-item active" aria-current="page">Données CAN</li>
+                </ol>
+            </nav>
+            
+            <div class="d-flex justify-content-between align-items-center mb-2">
+                <h2>Données CAN</h2>
+                <div>
+                    <a href="{% url 'robot_logs:can_export' log.id %}" class="btn btn-success">
+                        <i class="fas fa-file-csv"></i> Exporter en CSV
+                    </a>
+                </div>
+            </div>
+            
+            <div class="card mb-4">
+                <div class="card-header bg-primary text-white">
+                    <h5 class="card-title mb-0">Informations générales</h5>
+                </div>
+                <div class="card-body">
+                    <div class="row">
+                        <div class="col-md-6">
+                            <table class="table table-sm table-borderless">
+                                <tr>
+                                    <th>Identifiant du log :</th>
+                                    <td>{{ log.id }}</td>
+                                </tr>
+                                <tr>
+                                    <th>Robot :</th>
+                                    <td>{{ log.robot_id }}</td>
+                                </tr>
+                                <tr>
+                                    <th>Canal :</th>
+                                    <td>{{ metadata.channel_name|default:"Non spécifié" }}</td>
+                                </tr>
+                                <tr>
+                                    <th>Timestamp :</th>
+                                    <td>{{ log.timestamp }}</td>
+                                </tr>
+                            </table>
+                        </div>
+                        <div class="col-md-6">
+                            <table class="table table-sm table-borderless">
+                                <tr>
+                                    <th>Total de messages :</th>
+                                    <td>{{ total_messages }}</td>
+                                </tr>
+                                <tr>
+                                    <th>Types de messages :</th>
+                                    <td>{{ grouped_messages|length }}</td>
+                                </tr>
+                                <tr>
+                                    <th>Fichier DBC associé :</th>
+                                    <td>
+                                        {% if log.mdf_file.dbc_file %}
+                                            <a href="{% url 'robot_logs:dbc_file_detail' log.mdf_file.dbc_file.id %}">
+                                                {{ log.mdf_file.dbc_file.name }}
+                                            </a>
+                                        {% else %}
+                                            <span class="text-muted">Aucun</span>
+                                        {% endif %}
+                                    </td>
+                                </tr>
+                            </table>
+                        </div>
+                    </div>
+                </div>
+            </div>
+            
+            <div class="row">
+                <div class="col-md-5">
+                    <div class="card mb-4">
+                        <div class="card-header bg-info text-white">
+                            <h5 class="card-title mb-0">Statistiques CAN</h5>
+                        </div>
+                        <div class="card-body">
+                            {% if can_id_stats %}
+                                <h6>Top {{ can_id_stats|length }} IDs CAN</h6>
+                                <div class="table-responsive">
+                                    <table class="table table-sm table-hover">
+                                        <thead>
+                                            <tr>
+                                                <th>ID CAN</th>
+                                                <th>Nombre</th>
+                                                <th>Action</th>
+                                            </tr>
+                                        </thead>
+                                        <tbody>
+                                            {% for stat in can_id_stats %}
+                                                <tr>
+                                                    <td><code>{{ stat.can_id }}</code></td>
+                                                    <td>{{ stat.count }}</td>
+                                                    <td>
+                                                        <a href="{% url 'robot_logs:can_id_filter' log.id stat.can_id %}" class="btn btn-sm btn-outline-primary">
+                                                            <i class="fas fa-filter"></i> Filtrer
+                                                        </a>
+                                                    </td>
+                                                </tr>
+                                            {% endfor %}
+                                        </tbody>
+                                    </table>
+                                </div>
+                            {% else %}
+                                <div class="alert alert-info">
+                                    Aucune statistique disponible.
+                                </div>
+                            {% endif %}
+                            
+                            {% if chart_data %}
+                                <h6 class="mt-4">Distribution des messages par ID</h6>
+                                <div class="chart-container">
+                                    <canvas id="canChart"></canvas>
+                                </div>
+                            {% endif %}
+                        </div>
+                    </div>
+                    
+                    {% if can_signal_stats %}
+                        <div class="card mb-4">
+                            <div class="card-header bg-success text-white">
+                                <h5 class="card-title mb-0">Signaux décodés</h5>
+                            </div>
+                            <div class="card-body">
+                                <div class="table-responsive">
+                                    <table class="table table-sm table-hover">
+                                        <thead>
+                                            <tr>
+                                                <th>ID / Nom</th>
+                                                <th>Signal</th>
+                                                <th>Valeur</th>
+                                            </tr>
+                                        </thead>
+                                        <tbody>
+                                            {% for signal in can_signal_stats %}
+                                                <tr>
+                                                    <td>
+                                                        <code>{{ signal.message_id }}</code>
+                                                        {% if signal.message_name %}
+                                                            <br><small>{{ signal.message_name }}</small>
+                                                        {% endif %}
+                                                    </td>
+                                                    <td>{{ signal.signal_name }}</td>
+                                                    <td>
+                                                        <span class="signal-value">{{ signal.value }}</span>
+                                                        {% if signal.unit %}
+                                                            <small>{{ signal.unit }}</small>
+                                                        {% endif %}
+                                                    </td>
+                                                </tr>
+                                            {% endfor %}
+                                        </tbody>
+                                    </table>
+                                </div>
+                            </div>
+                        </div>
+                    {% endif %}
+                </div>
+                
+                <div class="col-md-7">
+                    <div class="card mb-4">
+                        <div class="card-header bg-primary text-white d-flex justify-content-between align-items-center">
+                            <h5 class="card-title mb-0">Messages CAN</h5>
+                            <span class="badge badge-light">{{ total_messages }} messages</span>
+                        </div>
+                        <div class="card-body">
+                            {% if limited_display %}
+                                <div class="alert alert-warning">
+                                    <i class="fas fa-exclamation-triangle"></i>
+                                    Affichage limité aux {{ display_limit }} premiers messages sur un total de {{ total_messages }}.
+                                    Utilisez les filtres pour affiner votre recherche.
+                                </div>
+                            {% endif %}
+                            
+                            <div class="mb-3">
+                                <h6>Filtrer par ID</h6>
+                                <div class="d-flex flex-wrap">
+                                    {% for can_id in can_id_stats|slice:":10" %}
+                                        <a href="{% url 'robot_logs:can_id_filter' log.id can_id.can_id %}" class="btn btn-sm btn-outline-secondary id-filter">
+                                            {{ can_id.can_id }}
+                                            <span class="badge badge-pill badge-info">{{ can_id.count }}</span>
+                                        </a>
+                                    {% endfor %}
+                                    {% if can_id_stats|length > 10 %}
+                                        <span class="text-muted align-self-center ml-2">+ {{ can_id_stats|length|add:"-10" }} autres IDs</span>
+                                    {% endif %}
+                                </div>
+                            </div>
+                            
+                            <div class="mt-3">
+                                {% if can_messages %}
+                                    {% for message in can_messages %}
+                                        <div class="can-message">
+                                            <div class="d-flex justify-content-between">
+                                                <div>
+                                                    <strong>ID: <code>{{ message.can_id }}</code></strong>
+                                                    {% if message.message_name %}
+                                                        <span class="badge badge-info">{{ message.message_name }}</span>
+                                                    {% endif %}
+                                                </div>
+                                                <div>
+                                                    <small class="text-muted">{{ message.timestamp|date:"H:i:s.u" }}</small>
+                                                </div>
+                                            </div>
+                                            <div class="mt-1">
+                                                <small>Données: <code>{{ message.raw_data }}</code></small>
+                                            </div>
+                                            {% if message.signals.exists %}
+                                                <div class="mt-2">
+                                                    <small><strong>Signaux décodés:</strong></small>
+                                                    <div class="ml-3">
+                                                        {% for signal in message.signals.all %}
+                                                            <div>
+                                                                <small>{{ signal.name }}: <span class="signal-value">{{ signal.value }}</span>
+                                                                {% if signal.unit %}{{ signal.unit }}{% endif %}</small>
+                                                            </div>
+                                                        {% endfor %}
+                                                    </div>
+                                                </div>
+                                            {% endif %}
+                                            <div class="mt-2 text-right">
+                                                <a href="{% url 'robot_logs:can_message_detail' message.id %}" class="btn btn-sm btn-outline-primary">
+                                                    <i class="fas fa-info-circle"></i> Détails
+                                                </a>
+                                            </div>
+                                        </div>
+                                    {% endfor %}
+                                {% else %}
+                                    <div class="alert alert-info">
+                                        Aucun message CAN disponible.
+                                    </div>
+                                {% endif %}
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+{% if chart_data %}
+<script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+<script>
+    document.addEventListener('DOMContentLoaded', function() {
+        var ctx = document.getElementById('canChart').getContext('2d');
+        var chartData = {{ chart_data|safe }};
+        
+        var canChart = new Chart(ctx, {
+            type: 'bar',
+            data: chartData,
+            options: {
+                responsive: true,
+                maintainAspectRatio: false,
+                plugins: {
+                    legend: {
+                        position: 'top',
+                    },
+                    title: {
+                        display: true,
+                        text: 'Distribution des messages CAN par ID'
+                    }
+                }
+            }
+        });
+    });
+</script>
+{% endif %}
+{% endblock %}
