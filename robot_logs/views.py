@@ -8,10 +8,14 @@ import csv
 import json
 import os
 import tempfile
+import logging
 
 from .models import RobotLog, CurveMeasurement, Laser2DScan, ImageData, MDFFile
 from .mdf_parser import MDFParser
 from .forms import MDFImportForm
+
+# Configurer le logger
+logger = logging.getLogger(__name__)
 
 class LogListView(ListView):
     model = RobotLog
@@ -148,60 +152,98 @@ class ImportMDFView(View):
     def post(self, request):
         """Traite le formulaire d'importation"""
         form = MDFImportForm(request.POST, request.FILES)
+        logger.info("Traitement du formulaire d'importation MDF")
         
         if form.is_valid():
-            # Créer un nouvel objet MDFFile
-            mdf_file = form.save()
+            logger.info("Formulaire valide, création de l'objet MDFFile")
             
             try:
-                # Créer un fichier temporaire pour le traitement
-                with tempfile.NamedTemporaryFile(delete=False) as tmp_file:
-                    for chunk in mdf_file.file.chunks():
-                        tmp_file.write(chunk)
-                    tmp_path = tmp_file.name
+                # Créer un nouvel objet MDFFile
+                mdf_file = form.save(commit=False)
                 
-                # Traiter le fichier MDF
-                parser = MDFParser(tmp_path, mdf_file)
+                # Vérifier le fichier
+                uploaded_file = request.FILES['file']
+                logger.info(f"Fichier reçu: {uploaded_file.name}, taille: {uploaded_file.size} octets")
                 
-                # Si l'option de prévisualisation est cochée, rediriger vers la page de prévisualisation
-                if form.cleaned_data.get('preview_first', False):
-                    # Stocker le chemin du fichier temporaire dans la session
-                    request.session['tmp_mdf_path'] = tmp_path
-                    request.session['mdf_file_id'] = mdf_file.id
-                    return redirect('robot_logs:preview_mdf')
+                if uploaded_file.size == 0:
+                    messages.error(request, "Erreur: Le fichier est vide.")
+                    return render(request, 'robot_logs/import_mdf.html', {'form': form})
                 
-                # Sinon, traiter directement le fichier
-                stats = parser.process_file()
-                parser.close()
+                # Sauvegarder l'objet MDFFile
+                mdf_file.save()
+                logger.info(f"Objet MDFFile créé: {mdf_file.id}")
                 
-                # Supprimer le fichier temporaire
-                os.unlink(tmp_path)
-                
-                # Afficher un message de succès
-                messages.success(
-                    request, 
-                    f"Importation réussie ! "
-                    f"{stats.get('text_logs', 0)} logs textuels, "
-                    f"{stats.get('curve_logs', 0)} courbes, "
-                    f"{stats.get('laser_logs', 0)} scans laser, "
-                    f"{stats.get('image_logs', 0)} images importés."
-                )
-                
-                return redirect('robot_logs:log_list')
-                
-            except Exception as e:
-                # En cas d'erreur, supprimer le fichier MDF
-                mdf_file.delete()
-                
-                # Supprimer le fichier temporaire s'il existe
-                if 'tmp_path' in locals():
+                try:
+                    # Créer un fichier temporaire pour le traitement
+                    with tempfile.NamedTemporaryFile(delete=False) as tmp_file:
+                        for chunk in uploaded_file.chunks():
+                            tmp_file.write(chunk)
+                        tmp_path = tmp_file.name
+                    
+                    logger.info(f"Fichier temporaire créé: {tmp_path}")
+                    
+                    # Vérifier que le fichier temporaire existe et n'est pas vide
+                    if os.path.getsize(tmp_path) == 0:
+                        raise ValueError("Le fichier temporaire est vide")
+                    
+                    # Traiter le fichier MDF
+                    parser = MDFParser(tmp_path, mdf_file)
+                    
+                    # Si l'option de prévisualisation est cochée, rediriger vers la page de prévisualisation
+                    if form.cleaned_data.get('preview_first', False):
+                        # Stocker le chemin du fichier temporaire dans la session
+                        request.session['tmp_mdf_path'] = tmp_path
+                        request.session['mdf_file_id'] = mdf_file.id
+                        logger.info("Redirection vers la prévisualisation")
+                        return redirect('robot_logs:preview_mdf')
+                    
+                    # Sinon, traiter directement le fichier
+                    logger.info("Traitement direct du fichier MDF")
+                    stats = parser.process_file()
+                    parser.close()
+                    
+                    # Supprimer le fichier temporaire
                     os.unlink(tmp_path)
-                
-                # Afficher un message d'erreur
+                    
+                    # Afficher un message de succès
+                    messages.success(
+                        request, 
+                        f"Importation réussie ! "
+                        f"{stats.get('text_logs', 0)} logs textuels, "
+                        f"{stats.get('curve_logs', 0)} courbes, "
+                        f"{stats.get('laser_logs', 0)} scans laser, "
+                        f"{stats.get('image_logs', 0)} images importés."
+                    )
+                    
+                    return redirect('robot_logs:log_list')
+                    
+                except Exception as e:
+                    # Journaliser l'erreur
+                    logger.error(f"Erreur lors du traitement du fichier MDF: {str(e)}", exc_info=True)
+                    
+                    # En cas d'erreur, supprimer l'objet MDFFile
+                    mdf_file.delete()
+                    
+                    # Supprimer le fichier temporaire s'il existe
+                    if 'tmp_path' in locals() and os.path.exists(tmp_path):
+                        os.unlink(tmp_path)
+                    
+                    # Afficher un message d'erreur détaillé
+                    messages.error(
+                        request, 
+                        f"Erreur lors de l'importation : {str(e)}. "
+                        f"Vérifiez que le fichier est un MDF valide et que asammdf est correctement installé."
+                    )
+                    return render(request, 'robot_logs/import_mdf.html', {'form': form})
+            
+            except Exception as e:
+                # Journaliser l'erreur
+                logger.error(f"Erreur générale lors de l'importation: {str(e)}", exc_info=True)
                 messages.error(request, f"Erreur lors de l'importation : {str(e)}")
-                return redirect('robot_logs:import_mdf')
+                return render(request, 'robot_logs/import_mdf.html', {'form': form})
         
         # Si le formulaire n'est pas valide, réafficher la page avec les erreurs
+        logger.warning(f"Formulaire non valide. Erreurs: {form.errors}")
         return render(request, 'robot_logs/import_mdf.html', {'form': form})
 
 class PreviewMDFView(View):
