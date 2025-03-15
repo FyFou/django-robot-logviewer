@@ -6,13 +6,15 @@ import traceback
 from datetime import datetime
 import re
 
+from django.db.models import Q
+
 from .mdfreader_adapter import MdfReaderAdapter, MDFREADER_AVAILABLE
 from .asammdf_adapter import AsamMdfAdapter, ASAMMDF_AVAILABLE
 from .utils import (
     is_text_event, is_curve_data, is_laser_data, is_image_data, is_can_data,
     process_text_event, process_curve_data, process_laser_data, process_image_data, process_can_data
 )
-from ..models import RobotLog
+from ..models import RobotLog, CANMapping
 
 logger = logging.getLogger(__name__)
 
@@ -93,6 +95,33 @@ class MDFParser:
         
         return self._adapter.get_channel_info(channel_name)
     
+    def _get_can_mapping(self, channel_name):
+        """
+        Récupère le mapping CAN pour un canal
+        
+        Args:
+            channel_name: Nom du canal CAN
+            
+        Returns:
+            Un tuple (can_mapping, dbc_file) ou (None, None) si aucun mapping n'est trouvé
+        """
+        if not self.mdf_file:
+            return None, None
+        
+        try:
+            # Rechercher un mapping exact ou un mapping de préfixe
+            can_mapping = CANMapping.objects.filter(
+                Q(mdf_file=self.mdf_file, channel_name=channel_name) |
+                Q(mdf_file=self.mdf_file, channel_name__startswith=channel_name.split('.')[0])
+            ).first()
+            
+            if can_mapping and can_mapping.dbc_file:
+                return can_mapping, can_mapping.dbc_file
+        except Exception as e:
+            logger.error(f"Erreur lors de la récupération du mapping CAN pour {channel_name}: {str(e)}")
+        
+        return None, None
+    
     def process_channel(self, channel_name):
         """
         Traite un canal spécifique du fichier MDF
@@ -132,7 +161,14 @@ class MDFParser:
             # Déterminer le type de données et le traiter
             if is_can_data(channel_name, data):
                 logger.info(f"Canal {channel_name} détecté comme données CAN")
-                return process_can_data(channel_name, data, timestamps, unit, description)
+                
+                # Vérifier s'il y a un mapping DBC pour ce canal
+                can_mapping, dbc_file = self._get_can_mapping(channel_name)
+                
+                return process_can_data(
+                    channel_name, data, timestamps, unit, description, 
+                    dbc_file=dbc_file, can_mapping=can_mapping
+                )
             elif is_text_event(channel_name, data):
                 logs = process_text_event(channel_name, data, timestamps, unit, description)
                 return logs, [], [], []
