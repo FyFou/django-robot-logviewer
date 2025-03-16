@@ -23,7 +23,7 @@ class LogGroupListView(ListView):
     
     def get_queryset(self):
         """Retourne les groupes avec un tri explicite"""
-        queryset = super().get_queryset().order_by('-created_at')
+        queryset = super().get_queryset().filter(is_channel_group=False).order_by('-created_at')
         
         # Filtrer par tag si fourni
         tag = self.request.GET.get('tag')
@@ -64,7 +64,8 @@ class LogGroupListView(ListView):
         
         # Statistiques pour la page d'accueil
         context['total_logs'] = RobotLog.objects.count()
-        context['total_groups'] = LogGroup.objects.count()
+        context['total_groups'] = LogGroup.objects.filter(is_channel_group=False).count()
+        context['channel_groups_count'] = LogGroup.objects.filter(is_channel_group=True).count()
         context['logs_in_groups'] = RobotLog.objects.filter(group__isnull=False).count()
         context['orphan_logs'] = RobotLog.objects.filter(group__isnull=True).count()
         context['mdf_files_count'] = MDFFile.objects.count()
@@ -132,6 +133,16 @@ class LogGroupDetailView(DetailView):
         # Vérifier si ce groupe est associé à un fichier MDF
         context['mdf_files'] = log_group.mdf_files.all() if hasattr(log_group, 'mdf_files') else []
         
+        # Si ce n'est pas un channel group, récupérer tous les channel groups associés
+        if not log_group.is_channel_group:
+            channel_groups = LogGroup.objects.filter(
+                parent_group=log_group,
+                is_channel_group=True
+            ).order_by('channel_group_index')
+            
+            context['channel_groups'] = channel_groups
+            context['channel_groups_count'] = channel_groups.count()
+        
         return context
 
 class LogGroupCreateView(CreateView):
@@ -144,6 +155,9 @@ class LogGroupCreateView(CreateView):
         return reverse('robot_logs:log_group_detail', kwargs={'pk': self.object.pk})
     
     def form_valid(self, form):
+        # S'assurer que le nouveau groupe n'est pas un channel group
+        form.instance.is_channel_group = False
+        
         messages.success(self.request, f"Groupe '{form.instance.name}' créé avec succès.")
         return super().form_valid(form)
 
@@ -157,6 +171,12 @@ class LogGroupUpdateView(UpdateView):
         return reverse('robot_logs:log_group_detail', kwargs={'pk': self.object.pk})
     
     def form_valid(self, form):
+        # Ne pas permettre de changer le statut channel_group
+        log_group = self.get_object()
+        form.instance.is_channel_group = log_group.is_channel_group
+        form.instance.channel_group_index = log_group.channel_group_index
+        form.instance.parent_group = log_group.parent_group
+        
         messages.success(self.request, f"Groupe '{form.instance.name}' mis à jour.")
         return super().form_valid(form)
 
@@ -170,11 +190,34 @@ class LogGroupDeleteView(DeleteView):
         log_group = self.get_object()
         name = log_group.name
         
+        # Si c'est un channel group, informer l'utilisateur
+        is_channel_group = log_group.is_channel_group
+        
         # Option: définir group=None pour tous les logs associés au lieu de les supprimer
         log_group.logs.update(group=None)
         
+        # Si c'est un groupe principal avec des channel groups, supprimer aussi les sous-groupes
+        if not is_channel_group:
+            channel_groups = LogGroup.objects.filter(parent_group=log_group, is_channel_group=True)
+            channel_groups_count = channel_groups.count()
+            
+            # Détacher les logs des channel groups avant de les supprimer
+            for channel_group in channel_groups:
+                channel_group.logs.update(group=None)
+                channel_group.delete()
+            
+            if channel_groups_count > 0:
+                messages.info(request, f"{channel_groups_count} channel groups associés ont également été supprimés.")
+        
         result = super().delete(request, *args, **kwargs)
-        messages.success(request, f"Groupe '{name}' supprimé. Les logs associés ont été détachés du groupe.")
+        
+        if is_channel_group:
+            messages.success(request, f"Channel group '{name}' supprimé. Les logs associés ont été détachés du groupe.")
+            if log_group.parent_group:
+                return redirect('robot_logs:log_group_detail', pk=log_group.parent_group.id)
+        else:
+            messages.success(request, f"Groupe '{name}' supprimé. Les logs associés ont été détachés du groupe.")
+        
         return result
 
 class AssignLogsToGroupView(View):
@@ -198,7 +241,8 @@ class AssignLogsToGroupView(View):
             if new_group_name:
                 group = LogGroup(
                     name=new_group_name,
-                    description=form.cleaned_data.get('new_group_description', '')
+                    description=form.cleaned_data.get('new_group_description', ''),
+                    is_channel_group=False  # S'assurer que ce n'est pas un channel group
                 )
                 group.save()
                 messages.success(request, f"Nouveau groupe '{new_group_name}' créé.")
@@ -274,7 +318,18 @@ class MergeLGroupsView(View):
             return redirect('robot_logs:home')
         
         target_group = get_object_or_404(LogGroup, id=target_group_id)
+        
+        # Ne pas permettre de fusionner des groupes si le groupe cible est un channel group
+        if target_group.is_channel_group:
+            messages.error(request, "Impossible de fusionner des groupes dans un channel group.")
+            return redirect('robot_logs:home')
+        
         groups_to_merge = LogGroup.objects.filter(id__in=group_ids).exclude(id=target_group_id)
+        
+        # Ne pas permettre de fusionner des channel groups
+        if groups_to_merge.filter(is_channel_group=True).exists():
+            messages.error(request, "Impossible de fusionner des channel groups. Veuillez sélectionner uniquement des groupes principaux.")
+            return redirect('robot_logs:home')
         
         # Déplacer tous les logs des autres groupes vers le groupe cible
         log_count = 0
@@ -282,6 +337,12 @@ class MergeLGroupsView(View):
             # Mettre à jour les logs
             updated = group.logs.update(group=target_group)
             log_count += updated
+            
+            # Déplacer les channel groups associés vers le groupe cible
+            channel_groups = LogGroup.objects.filter(parent_group=group, is_channel_group=True)
+            for channel_group in channel_groups:
+                channel_group.parent_group = target_group
+                channel_group.save()
             
             # Mettre à jour les fichiers MDF si présents
             if hasattr(group, 'mdf_files'):
