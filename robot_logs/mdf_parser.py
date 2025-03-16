@@ -222,6 +222,7 @@ class MDFParser:
                     'samples_count': len(signal.samples),
                     'data_type': str(signal.samples.dtype),
                     'unit': signal.unit if hasattr(signal, 'unit') else None,
+                    'group_id': self._log_group.id if self._log_group else None,  # Ajouter l'ID du groupe
                 }
                 log.set_metadata_from_dict(metadata)
                 
@@ -344,6 +345,31 @@ class MDFParser:
                 except Exception as e:
                     logger.error(f"Erreur lors de la sauvegarde des données pour {channel_name}: {e}")
                     statistics['errors'] += 1
+        
+        # Après avoir traité tous les canaux, vérifier si des données n'ont pas été associées au groupe
+        if log_group and self.mdf_file:
+            # Récupérer tous les logs importés pour ce fichier MDF
+            source_pattern = f"MDF Import: {self.mdf_file.name}"
+            imported_logs = RobotLog.objects.filter(source=source_pattern, group__isnull=True)
+            
+            # Forcer l'association au groupe pour tous les logs orphelins
+            count = imported_logs.update(group=log_group)
+            logger.info(f"Associé {count} logs orphelins au groupe {log_group.name}")
+            
+            # Mettre à jour manuellement les données associées
+            for log in RobotLog.objects.filter(source=source_pattern):
+                if log.log_type == 'CURVE':
+                    # Vérifier si des mesures de courbes sont orphelines
+                    log.curve_measurements.filter(log__group__isnull=True).update(log=log)
+                elif log.log_type == 'LASER2D':
+                    # Vérifier si des scans lasers sont orphelins
+                    log.laser_scans.filter(log__group__isnull=True).update(log=log)
+                elif log.log_type == 'IMAGE':
+                    # Vérifier si des images sont orphelines
+                    log.images.filter(log__group__isnull=True).update(log=log)
+                elif log.log_type == 'CAN':
+                    # Vérifier si des messages CAN sont orphelins
+                    log.can_messages.filter(log__group__isnull=True).update(log=log)
         
         # Marquer le fichier MDF comme traité
         if self.mdf_file:
