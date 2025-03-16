@@ -1,5 +1,45 @@
 from django.db import models
 import json
+from django.urls import reverse
+
+class LogGroup(models.Model):
+    """Modèle pour regrouper les logs liés à un même événement ou session"""
+    name = models.CharField(max_length=200)
+    description = models.TextField(blank=True, null=True)
+    robot_id = models.CharField(max_length=100, blank=True, null=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    start_time = models.DateTimeField(null=True, blank=True)
+    end_time = models.DateTimeField(null=True, blank=True)
+    tags = models.CharField(max_length=255, blank=True, null=True, 
+                           help_text="Tags séparés par des virgules pour faciliter la recherche")
+    
+    class Meta:
+        ordering = ['-created_at']
+        verbose_name = "Groupe de logs"
+        verbose_name_plural = "Groupes de logs"
+    
+    def __str__(self):
+        return self.name
+    
+    def get_absolute_url(self):
+        return reverse('robot_logs:log_group_detail', args=[self.id])
+    
+    @property
+    def log_count(self):
+        """Retourne le nombre de logs dans ce groupe"""
+        return self.logs.count()
+    
+    @property
+    def log_types_summary(self):
+        """Retourne un résumé des types de logs dans ce groupe"""
+        types = self.logs.values_list('log_type', flat=True)
+        summary = {}
+        for log_type in types:
+            if log_type in summary:
+                summary[log_type] += 1
+            else:
+                summary[log_type] = 1
+        return summary
 
 class RobotLog(models.Model):
     LOG_LEVELS = (
@@ -24,6 +64,10 @@ class RobotLog(models.Model):
     message = models.TextField()
     source = models.CharField(max_length=200)
     log_type = models.CharField(max_length=10, choices=LOG_TYPES, default='TEXT')
+    
+    # Relation avec un groupe de logs
+    group = models.ForeignKey(LogGroup, on_delete=models.SET_NULL, 
+                              null=True, blank=True, related_name='logs')
     
     # Champ pour stocker des données associées
     data_file = models.FileField(upload_to='log_data/', null=True, blank=True)
@@ -140,6 +184,10 @@ class MDFFile(models.Model):
     mdf_version = models.CharField(max_length=10, null=True, blank=True)
     processed = models.BooleanField(default=False)
     dbc_file = models.ForeignKey(DBCFile, on_delete=models.SET_NULL, null=True, blank=True, related_name='mdf_files')
+    
+    # Associer automatiquement un groupe pour les logs générés par ce fichier MDF
+    log_group = models.ForeignKey(LogGroup, on_delete=models.SET_NULL, 
+                                 null=True, blank=True, related_name='mdf_files')
     
     def __str__(self):
         return self.name
