@@ -16,7 +16,7 @@ import io
 from django.conf import settings
 from django.core.files.base import ContentFile
 
-from .models import RobotLog, CurveMeasurement, Laser2DScan, ImageData, MDFFile, CANMessage, CANSignal
+from .models import RobotLog, CurveMeasurement, Laser2DScan, ImageData, MDFFile, CANMessage, CANSignal, LogGroup
 from .can_parser import DBCParser, extract_can_messages_from_mdf
 
 logger = logging.getLogger(__name__)
@@ -36,6 +36,7 @@ class MDFParser:
         self.mdf_file = mdf_file_obj
         self._mdf = None
         self._dbc_parser = None
+        self._log_group = None
         
     def open(self):
         """Ouvre le fichier MDF"""
@@ -166,8 +167,9 @@ class MDFParser:
                     robot_id="MDF_Import",
                     level="ERROR",
                     message=f"Canal {channel_name} non trouvé dans le fichier MDF",
-                    source="MDF Import",
-                    log_type="TEXT"
+                    source=f"MDF Import: {self.mdf_file.name if self.mdf_file else 'Unknown'}",
+                    log_type="TEXT",
+                    group=self._log_group  # Assignation au groupe
                 )
                 return [error_log], [], [], [], []
             
@@ -177,22 +179,29 @@ class MDFParser:
             # Déterminer le type de données
             if self._is_text_event(channel_name, signal):
                 logs = self._process_text_event(channel_name, signal)
+                # Associer les logs au groupe
+                for log in logs:
+                    log.group = self._log_group
                 return logs, [], [], [], []
                 
             elif self._is_curve_data(channel_name, signal):
                 main_log, curve_measurements = self._process_curve_data(channel_name, signal)
+                main_log.group = self._log_group  # Assignation au groupe
                 return [main_log], curve_measurements, [], [], []
                 
             elif self._is_laser_data(channel_name, signal):
                 main_log, laser_scan = self._process_laser_data(channel_name, signal)
+                main_log.group = self._log_group  # Assignation au groupe
                 return [main_log], [], [laser_scan], [], []
                 
             elif self._is_image_data(channel_name, signal):
                 main_log, image = self._process_image_data(channel_name, signal)
+                main_log.group = self._log_group  # Assignation au groupe
                 return [main_log], [], [], [image] if image else [], []
                 
             elif self._is_can_data(channel_name, signal):
                 main_log, can_messages = self._process_can_data(channel_name, signal)
+                main_log.group = self._log_group  # Assignation au groupe
                 return [main_log], [], [], [], can_messages
                 
             else:
@@ -202,8 +211,9 @@ class MDFParser:
                     robot_id="MDF_Import",
                     level="INFO",
                     message=f"Données non classifiées pour {channel_name}",
-                    source="MDF Import",
-                    log_type="TEXT"
+                    source=f"MDF Import: {self.mdf_file.name if self.mdf_file else 'Unknown'}",
+                    log_type="TEXT",
+                    group=self._log_group  # Assignation au groupe
                 )
                 
                 # Ajouter des métadonnées
@@ -225,17 +235,19 @@ class MDFParser:
                 robot_id="MDF_Import",
                 level="ERROR",
                 message=f"Erreur lors du traitement du canal {channel_name}: {e}",
-                source="MDF Import",
-                log_type="TEXT"
+                source=f"MDF Import: {self.mdf_file.name if self.mdf_file else 'Unknown'}",
+                log_type="TEXT",
+                group=self._log_group  # Assignation au groupe
             )
             return [error_log], [], [], [], []
     
-    def process_file(self, dbc_file=None):
+    def process_file(self, dbc_file=None, log_group=None):
         """
         Traite l'ensemble du fichier MDF et importe tous les canaux
         
         Args:
             dbc_file: Fichier DBC optionnel pour décoder les messages CAN
+            log_group: Groupe de logs auquel associer les logs générés
             
         Returns:
             Dictionnaire contenant des statistiques sur les données importées
@@ -243,6 +255,9 @@ class MDFParser:
         if not self._mdf:
             if not self.open():
                 return {'error': 'Impossible d\'ouvrir le fichier MDF'}
+        
+        # Stocker le groupe de logs pour l'utiliser lors du traitement
+        self._log_group = log_group
         
         # Initialiser le parseur DBC si un fichier est fourni
         if dbc_file:
@@ -276,6 +291,7 @@ class MDFParser:
             # Sauvegarder les logs
             for log in logs:
                 try:
+                    # Le log est déjà associé au groupe dans process_channel
                     log.save()
                     
                     # Associer les mesures de courbe au log principal
@@ -332,6 +348,8 @@ class MDFParser:
         # Marquer le fichier MDF comme traité
         if self.mdf_file:
             self.mdf_file.processed = True
+            if log_group:
+                self.mdf_file.log_group = log_group
             self.mdf_file.save()
             
         return statistics
