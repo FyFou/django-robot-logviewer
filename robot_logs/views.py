@@ -10,9 +10,9 @@ import os
 import tempfile
 import logging
 
-from .models import RobotLog, CurveMeasurement, Laser2DScan, ImageData, MDFFile
+from .models import RobotLog, CurveMeasurement, Laser2DScan, ImageData, MDFFile, LogGroup
 from .mdf_parser import MDFParser
-from .forms import MDFImportForm
+from .forms import MDFImportForm, LogFilterForm, AssignLogsToGroupForm
 
 # Configurer le logger
 logger = logging.getLogger(__name__)
@@ -40,6 +40,14 @@ class LogListView(ListView):
         log_type = self.request.GET.get('log_type')
         if log_type:
             queryset = queryset.filter(log_type=log_type)
+        
+        # Filtre par groupe
+        group_id = self.request.GET.get('group')
+        if group_id:
+            if group_id == 'none':
+                queryset = queryset.filter(group__isnull=True)
+            else:
+                queryset = queryset.filter(group_id=group_id)
             
         # Recherche dans les messages
         search = self.request.GET.get('search')
@@ -67,6 +75,13 @@ class LogListView(ListView):
         context['log_types'] = dict(RobotLog.LOG_TYPES)
         context['mdf_import_form'] = MDFImportForm()
         context['has_mdf_files'] = MDFFile.objects.exists()
+        
+        # Ajouter les groupes disponibles
+        context['groups'] = LogGroup.objects.all().order_by('-created_at')
+        
+        # Ajouter le formulaire d'assignation de logs à un groupe
+        context['assign_form'] = AssignLogsToGroupForm()
+        
         return context
 
 class LogDetailView(DetailView):
@@ -109,6 +124,13 @@ class LogDetailView(DetailView):
         # Ajouter les métadonnées
         context['metadata'] = log.get_metadata_as_dict()
         
+        # Ajouter le groupe si présent
+        if log.group:
+            context['group'] = log.group
+        
+        # Ajouter le formulaire pour assigner à un groupe
+        context['groups'] = LogGroup.objects.all().order_by('-created_at')
+        
         return context
 
 def export_logs_csv(request):
@@ -126,6 +148,11 @@ def export_logs_csv(request):
     log_type = request.GET.get('log_type')
     if log_type:
         queryset = queryset.filter(log_type=log_type)
+    
+    # Filtre par groupe
+    group_id = request.GET.get('group')
+    if group_id:
+        queryset = queryset.filter(group_id=group_id)
         
     search = request.GET.get('search')
     if search:
@@ -146,7 +173,7 @@ def export_logs_csv(request):
     response['Content-Disposition'] = 'attachment; filename=\"robot_logs.csv\"'
     
     writer = csv.writer(response)
-    writer.writerow(['Date/Heure', 'Robot ID', 'Niveau', 'Type', 'Message', 'Source'])
+    writer.writerow(['Date/Heure', 'Robot ID', 'Niveau', 'Type', 'Groupe', 'Message', 'Source'])
     
     for log in queryset:
         writer.writerow([
@@ -154,6 +181,7 @@ def export_logs_csv(request):
             log.robot_id,
             log.level,
             log.log_type,
+            log.group.name if log.group else '',
             log.message,
             log.source
         ])
@@ -224,6 +252,24 @@ class ImportMDFView(View):
                     # Supprimer le fichier temporaire
                     os.unlink(tmp_path)
                     
+                    # Créer un groupe pour les logs importés
+                    log_group = LogGroup(
+                        name=f"Import MDF: {mdf_file.name}",
+                        description=f"Logs générés depuis le fichier MDF {mdf_file.name}",
+                        robot_id=None  # Sera détecté automatiquement
+                    )
+                    log_group.save()
+                    
+                    # Associer le groupe aux logs importés
+                    if stats.get('text_logs', 0) > 0 or stats.get('curve_logs', 0) > 0 or stats.get('laser_logs', 0) > 0 or stats.get('image_logs', 0) > 0:
+                        # Récupérer tous les logs générés par cet import
+                        imported_logs = RobotLog.objects.filter(source=f"MDF Import: {mdf_file.name}")
+                        imported_logs.update(group=log_group)
+                        
+                        # Associer le groupe au fichier MDF
+                        mdf_file.log_group = log_group
+                        mdf_file.save()
+                    
                     # Afficher un message de succès
                     messages.success(
                         request, 
@@ -231,10 +277,11 @@ class ImportMDFView(View):
                         f"{stats.get('text_logs', 0)} logs textuels, "
                         f"{stats.get('curve_logs', 0)} courbes, "
                         f"{stats.get('laser_logs', 0)} scans laser, "
-                        f"{stats.get('image_logs', 0)} images importés."
+                        f"{stats.get('image_logs', 0)} images importés. "
+                        f"Groupe '{log_group.name}' créé."
                     )
                     
-                    return redirect('robot_logs:log_list')
+                    return redirect('robot_logs:log_group_detail', pk=log_group.id)
                     
                 except Exception as e:
                     # Journaliser l'erreur
@@ -358,6 +405,24 @@ class PreviewMDFView(View):
             del request.session['tmp_mdf_path']
             del request.session['mdf_file_id']
             
+            # Créer un groupe pour les logs importés
+            log_group = LogGroup(
+                name=f"Import MDF: {mdf_file.name}",
+                description=f"Logs générés depuis le fichier MDF {mdf_file.name}",
+                robot_id=None  # Sera détecté automatiquement
+            )
+            log_group.save()
+            
+            # Associer le groupe aux logs importés
+            if stats.get('text_logs', 0) > 0 or stats.get('curve_logs', 0) > 0 or stats.get('laser_logs', 0) > 0 or stats.get('image_logs', 0) > 0:
+                # Récupérer tous les logs générés par cet import
+                imported_logs = RobotLog.objects.filter(source=f"MDF Import: {mdf_file.name}")
+                imported_logs.update(group=log_group)
+                
+                # Associer le groupe au fichier MDF
+                mdf_file.log_group = log_group
+                mdf_file.save()
+            
             # Afficher un message de succès
             messages.success(
                 request, 
@@ -365,10 +430,11 @@ class PreviewMDFView(View):
                 f"{stats.get('text_logs', 0)} logs textuels, "
                 f"{stats.get('curve_logs', 0)} courbes, "
                 f"{stats.get('laser_logs', 0)} scans laser, "
-                f"{stats.get('image_logs', 0)} images importés."
+                f"{stats.get('image_logs', 0)} images importés. "
+                f"Groupe '{log_group.name}' créé."
             )
             
-            return redirect('robot_logs:log_list')
+            return redirect('robot_logs:log_group_detail', pk=log_group.id)
             
         except Exception as e:
             # En cas d'erreur, nettoyer
