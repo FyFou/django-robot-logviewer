@@ -1,0 +1,328 @@
+{% extends 'base.html' %}
+{% load static %}
+
+{% block title %}Groupe: {{ log_group.name }}{% endblock %}
+
+{% block content %}
+<div class="container mt-4">
+    <nav aria-label="breadcrumb">
+        <ol class="breadcrumb">
+            <li class="breadcrumb-item"><a href="{% url 'robot_logs:log_list' %}">Logs</a></li>
+            <li class="breadcrumb-item"><a href="{% url 'robot_logs:log_group_list' %}">Groupes</a></li>
+            <li class="breadcrumb-item active" aria-current="page">{{ log_group.name }}</li>
+        </ol>
+    </nav>
+
+    <div class="card mb-4">
+        <div class="card-header d-flex justify-content-between align-items-center">
+            <h2>{{ log_group.name }}</h2>
+            <div class="btn-group">
+                <button type="button" class="btn btn-primary" data-bs-toggle="modal" data-bs-target="#editGroupModal">
+                    <i class="fas fa-edit"></i> Modifier
+                </button>
+                <a href="{% url 'robot_logs:log_group_delete' pk=log_group.id %}" class="btn btn-danger">
+                    <i class="fas fa-trash"></i> Supprimer
+                </a>
+            </div>
+        </div>
+        <div class="card-body">
+            <div class="row">
+                <div class="col-md-6">
+                    <dl class="row">
+                        <dt class="col-sm-4">Robot ID:</dt>
+                        <dd class="col-sm-8">{{ log_group.robot_id|default:"Non spécifié" }}</dd>
+                        
+                        <dt class="col-sm-4">Nombre de logs:</dt>
+                        <dd class="col-sm-8">{{ log_count }}</dd>
+                        
+                        <dt class="col-sm-4">Période:</dt>
+                        <dd class="col-sm-8">
+                            {% if log_group.start_time %}
+                                {{ log_group.start_time|date:"d/m/Y H:i" }}
+                                {% if log_group.end_time %}
+                                    à {{ log_group.end_time|date:"d/m/Y H:i" }}
+                                {% endif %}
+                            {% else %}
+                                Non spécifiée
+                            {% endif %}
+                        </dd>
+                        
+                        <dt class="col-sm-4">Tags:</dt>
+                        <dd class="col-sm-8">
+                            {% if log_group.tags %}
+                                {% for tag in log_group.tags.split %}
+                                    <span class="badge bg-primary">{{ tag }}</span>
+                                {% endfor %}
+                            {% else %}
+                                Aucun
+                            {% endif %}
+                        </dd>
+                    </dl>
+                </div>
+                <div class="col-md-6">
+                    <h5>Description</h5>
+                    <p>{{ log_group.description|default:"Aucune description" }}</p>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <div class="card">
+        <div class="card-header d-flex justify-content-between align-items-center">
+            <h4>Logs dans ce groupe</h4>
+            <div class="btn-group">
+                <a href="{% url 'robot_logs:export_csv' %}?group={{ log_group.id }}" class="btn btn-success">
+                    <i class="fas fa-file-csv"></i> Exporter CSV
+                </a>
+                <button type="button" class="btn btn-secondary" data-bs-toggle="modal" data-bs-target="#removeLogsModal">
+                    Retirer des logs
+                </button>
+            </div>
+        </div>
+        <div class="card-body">
+            <!-- Filtres pour les logs -->
+            <form method="get" class="mb-4 row g-3">
+                <div class="col-md-2">
+                    <label for="level" class="form-label">Niveau</label>
+                    <select class="form-select" id="level" name="level">
+                        <option value="">Tous</option>
+                        {% for level_code, level_name in log_levels_dict.items %}
+                            <option value="{{ level_code }}" {% if request.GET.level == level_code %}selected{% endif %}>{{ level_name }}</option>
+                        {% endfor %}
+                    </select>
+                </div>
+                <div class="col-md-2">
+                    <label for="log_type" class="form-label">Type</label>
+                    <select class="form-select" id="log_type" name="log_type">
+                        <option value="">Tous</option>
+                        {% for type_code, type_name in log_types_dict.items %}
+                            <option value="{{ type_code }}" {% if request.GET.log_type == type_code %}selected{% endif %}>{{ type_name }}</option>
+                        {% endfor %}
+                    </select>
+                </div>
+                <div class="col-md-4">
+                    <label for="search" class="form-label">Recherche</label>
+                    <input type="text" class="form-control" id="search" name="search" value="{{ request.GET.search|default:'' }}">
+                </div>
+                <div class="col-md-4 d-flex align-items-end">
+                    <button type="submit" class="btn btn-primary me-2">Filtrer</button>
+                    <a href="{% url 'robot_logs:log_group_detail' pk=log_group.id %}" class="btn btn-secondary">Réinitialiser</a>
+                </div>
+            </form>
+
+            <!-- Statistiques -->
+            <div class="row mb-4">
+                <div class="col-md-6">
+                    <div class="card">
+                        <div class="card-header">Types de logs</div>
+                        <div class="card-body">
+                            <div class="table-responsive">
+                                <table class="table table-sm">
+                                    <thead>
+                                        <tr>
+                                            <th>Type</th>
+                                            <th>Nombre</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody>
+                                        {% for log_type, count in log_types_count.items %}
+                                        <tr>
+                                            <td>{{ log_type }}</td>
+                                            <td>{{ count }}</td>
+                                        </tr>
+                                        {% endfor %}
+                                    </tbody>
+                                </table>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+                <div class="col-md-6">
+                    <div class="card">
+                        <div class="card-header">Niveaux de logs</div>
+                        <div class="card-body">
+                            <div class="table-responsive">
+                                <table class="table table-sm">
+                                    <thead>
+                                        <tr>
+                                            <th>Niveau</th>
+                                            <th>Nombre</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody>
+                                        {% for level, count in log_levels_count.items %}
+                                        <tr>
+                                            <td>{{ level }}</td>
+                                            <td>{{ count }}</td>
+                                        </tr>
+                                        {% endfor %}
+                                    </tbody>
+                                </table>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Liste des logs -->
+            <form id="logsForm" method="post" action="{% url 'robot_logs:remove_logs_from_group' group_id=log_group.id %}">
+                {% csrf_token %}
+                {% if logs %}
+                <div class="table-responsive">
+                    <table class="table table-striped">
+                        <thead>
+                            <tr>
+                                <th>
+                                    <input type="checkbox" id="selectAll" class="form-check-input">
+                                </th>
+                                <th>Date/Heure</th>
+                                <th>Niveau</th>
+                                <th>Type</th>
+                                <th>Message</th>
+                                <th>Source</th>
+                                <th>Actions</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            {% for log in logs %}
+                            <tr class="{% if log.level == 'ERROR' or log.level == 'CRITICAL' %}table-danger{% elif log.level == 'WARNING' %}table-warning{% endif %}">
+                                <td>
+                                    <input type="checkbox" name="log_ids" value="{{ log.id }}" class="form-check-input log-checkbox">
+                                </td>
+                                <td>{{ log.timestamp|date:"Y-m-d H:i:s" }}</td>
+                                <td><span class="badge {% if log.level == 'DEBUG' %}bg-secondary{% elif log.level == 'INFO' %}bg-info{% elif log.level == 'WARNING' %}bg-warning{% elif log.level == 'ERROR' %}bg-danger{% elif log.level == 'CRITICAL' %}bg-dark{% endif %}">{{ log.level }}</span></td>
+                                <td>{{ log.get_log_type_display }}</td>
+                                <td>{{ log.message|truncatechars:50 }}</td>
+                                <td>{{ log.source }}</td>
+                                <td>
+                                    <div class="btn-group btn-group-sm">
+                                        {% if log.log_type == 'CURVE' %}
+                                        <a href="{% url 'robot_logs:curve_view' log_id=log.id %}" class="btn btn-outline-primary">
+                                            <i class="fas fa-chart-line"></i>
+                                        </a>
+                                        {% elif log.log_type == 'LASER2D' %}
+                                        <a href="{% url 'robot_logs:laser_view' log_id=log.id %}" class="btn btn-outline-primary">
+                                            <i class="fas fa-radar"></i>
+                                        </a>
+                                        {% elif log.log_type == 'IMAGE' %}
+                                        <a href="{% url 'robot_logs:image_view' log_id=log.id %}" class="btn btn-outline-primary">
+                                            <i class="fas fa-image"></i>
+                                        </a>
+                                        {% elif log.log_type == 'CAN' %}
+                                        <a href="{% url 'robot_logs:can_view' log_id=log.id %}" class="btn btn-outline-primary">
+                                            <i class="fas fa-network-wired"></i>
+                                        </a>
+                                        {% else %}
+                                        <a href="{% url 'robot_logs:log_detail' pk=log.id %}" class="btn btn-outline-primary">
+                                            <i class="fas fa-eye"></i>
+                                        </a>
+                                        {% endif %}
+                                    </div>
+                                </td>
+                            </tr>
+                            {% endfor %}
+                        </tbody>
+                    </table>
+                </div>
+                {% else %}
+                <div class="alert alert-info">
+                    Aucun log dans ce groupe. Utilisez la fonction d'assignation de logs depuis la page principale.
+                </div>
+                {% endif %}
+            </form>
+        </div>
+    </div>
+</div>
+
+<!-- Modal pour modifier le groupe -->
+<div class="modal fade" id="editGroupModal" tabindex="-1" aria-labelledby="editGroupModalLabel" aria-hidden="true">
+    <div class="modal-dialog">
+        <div class="modal-content">
+            <form method="post" action="{% url 'robot_logs:log_group_update' pk=log_group.id %}">
+                {% csrf_token %}
+                <div class="modal-header">
+                    <h5 class="modal-title" id="editGroupModalLabel">Modifier le groupe</h5>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+                </div>
+                <div class="modal-body">
+                    <div class="mb-3">
+                        <label for="id_name" class="form-label">Nom</label>
+                        <input type="text" class="form-control" id="id_name" name="name" value="{{ log_group.name }}" required>
+                    </div>
+                    <div class="mb-3">
+                        <label for="id_description" class="form-label">Description</label>
+                        <textarea class="form-control" id="id_description" name="description" rows="3">{{ log_group.description }}</textarea>
+                    </div>
+                    <div class="mb-3">
+                        <label for="id_robot_id" class="form-label">Robot ID</label>
+                        <input type="text" class="form-control" id="id_robot_id" name="robot_id" value="{{ log_group.robot_id|default:'' }}">
+                    </div>
+                    <div class="mb-3">
+                        <label for="id_tags" class="form-label">Tags</label>
+                        <input type="text" class="form-control" id="id_tags" name="tags" value="{{ log_group.tags|default:'' }}" placeholder="test, validation, erreur">
+                        <div class="form-text">Entrez des tags séparés par des virgules.</div>
+                    </div>
+                    <div class="row">
+                        <div class="col-md-6">
+                            <div class="mb-3">
+                                <label for="id_start_time" class="form-label">Date de début</label>
+                                <input type="datetime-local" class="form-control" id="id_start_time" name="start_time" value="{{ log_group.start_time|date:'Y-m-d\TH:i' }}">
+                            </div>
+                        </div>
+                        <div class="col-md-6">
+                            <div class="mb-3">
+                                <label for="id_end_time" class="form-label">Date de fin</label>
+                                <input type="datetime-local" class="form-control" id="id_end_time" name="end_time" value="{{ log_group.end_time|date:'Y-m-d\TH:i' }}">
+                            </div>
+                        </div>
+                    </div>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Annuler</button>
+                    <button type="submit" class="btn btn-primary">Enregistrer</button>
+                </div>
+            </form>
+        </div>
+    </div>
+</div>
+
+<!-- Modal pour retirer des logs -->
+<div class="modal fade" id="removeLogsModal" tabindex="-1" aria-labelledby="removeLogsModalLabel" aria-hidden="true">
+    <div class="modal-dialog">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title" id="removeLogsModalLabel">Retirer des logs du groupe</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+            </div>
+            <div class="modal-body">
+                <p>Sélectionnez les logs à retirer du groupe puis cliquez sur "Retirer".</p>
+                <p>Les logs sélectionnés ne seront pas supprimés, juste retirés de ce groupe.</p>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Annuler</button>
+                <button type="button" class="btn btn-danger" id="removeSelectedLogs">Retirer les logs sélectionnés</button>
+            </div>
+        </div>
+    </div>
+</div>
+
+{% block extra_js %}
+<script>
+    $(document).ready(function() {
+        // Gestion du "Select All" checkbox
+        $('#selectAll').on('change', function() {
+            $('.log-checkbox').prop('checked', $(this).prop('checked'));
+        });
+        
+        // Soumettre le formulaire lorsque le bouton de suppression est cliqué
+        $('#removeSelectedLogs').on('click', function() {
+            if ($('.log-checkbox:checked').length > 0) {
+                $('#logsForm').submit();
+            } else {
+                alert('Veuillez sélectionner au moins un log à retirer.');
+            }
+        });
+    });
+</script>
+{% endblock %}
+{% endblock %}
