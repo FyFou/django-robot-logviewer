@@ -8,8 +8,9 @@ from . import views_group
 app_name = 'robot_logs'
 
 urlpatterns = [
-    # Vues principales
-    path('', views.LogListView.as_view(), name='log_list'),
+    # Vues principales - changement pour mettre les groupes en page principale
+    path('', views_group.LogGroupListView.as_view(), name='home'),  # Nouvelle URL principale
+    path('logs/', views.LogListView.as_view(), name='log_list'),    # Logs individuels maintenant sous /logs/
     path('log/<int:pk>/', views.LogDetailView.as_view(), name='log_detail'),
     path('export-csv/', views.export_logs_csv, name='export_csv'),
     
@@ -38,8 +39,8 @@ urlpatterns = [
     path('can-message/<int:message_id>/', views_can.CANMessageDetailView.as_view(), name='can_message_detail'),
     path('log/<int:log_id>/can/filter/<str:can_id>/', views_can.CANIDFilterView.as_view(), name='can_id_filter'),
     
-    # Nouvelles vues pour les groupes de logs
-    path('groups/', views_group.LogGroupListView.as_view(), name='log_group_list'),
+    # Vues pour les groupes de logs
+    path('groups/', views_group.LogGroupListView.as_view(), name='log_group_list'),  # Gardé pour compatibilité
     path('groups/create/', views_group.LogGroupCreateView.as_view(), name='log_group_create'),
     path('groups/<int:pk>/', views_group.LogGroupDetailView.as_view(), name='log_group_detail'),
     path('groups/<int:pk>/update/', views_group.LogGroupUpdateView.as_view(), name='log_group_update'),
