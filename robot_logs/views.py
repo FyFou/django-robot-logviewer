@@ -10,9 +10,9 @@ import os
 import tempfile
 import logging
 
-from .models import RobotLog, CurveMeasurement, Laser2DScan, ImageData, MDFFile
+from .models import RobotLog, CurveMeasurement, Laser2DScan, ImageData, MDFFile, LogGroup
 from .mdf_parser import MDFParser
-from .forms import MDFImportForm
+from .forms import MDFImportForm, LogFilterForm, AssignLogsToGroupForm
 
 # Configurer le logger
 logger = logging.getLogger(__name__)
@@ -40,6 +40,14 @@ class LogListView(ListView):
         log_type = self.request.GET.get('log_type')
         if log_type:
             queryset = queryset.filter(log_type=log_type)
+        
+        # Filtre par groupe
+        group_id = self.request.GET.get('group')
+        if group_id:
+            if group_id == 'none':
+                queryset = queryset.filter(group__isnull=True)
+            else:
+                queryset = queryset.filter(group_id=group_id)
             
         # Recherche dans les messages
         search = self.request.GET.get('search')
@@ -67,6 +75,13 @@ class LogListView(ListView):
         context['log_types'] = dict(RobotLog.LOG_TYPES)
         context['mdf_import_form'] = MDFImportForm()
         context['has_mdf_files'] = MDFFile.objects.exists()
+        
+        # Ajouter les groupes disponibles
+        context['groups'] = LogGroup.objects.all().order_by('-created_at')
+        
+        # Ajouter le formulaire d'assignation de logs à un groupe
+        context['assign_form'] = AssignLogsToGroupForm()
+        
         return context
 
 class LogDetailView(DetailView):
@@ -109,6 +124,13 @@ class LogDetailView(DetailView):
         # Ajouter les métadonnées
         context['metadata'] = log.get_metadata_as_dict()
         
+        # Ajouter le groupe si présent
+        if log.group:
+            context['group'] = log.group
+        
+        # Ajouter le formulaire pour assigner à un groupe
+        context['groups'] = LogGroup.objects.all().order_by('-created_at')
+        
         return context
 
 def export_logs_csv(request):
@@ -126,6 +148,11 @@ def export_logs_csv(request):
     log_type = request.GET.get('log_type')
     if log_type:
         queryset = queryset.filter(log_type=log_type)
+    
+    # Filtre par groupe
+    group_id = request.GET.get('group')
+    if group_id:
+        queryset = queryset.filter(group_id=group_id)
         
     search = request.GET.get('search')
     if search:
@@ -146,7 +173,7 @@ def export_logs_csv(request):
     response['Content-Disposition'] = 'attachment; filename=\"robot_logs.csv\"'
     
     writer = csv.writer(response)
-    writer.writerow(['Date/Heure', 'Robot ID', 'Niveau', 'Type', 'Message', 'Source'])
+    writer.writerow(['Date/Heure', 'Robot ID', 'Niveau', 'Type', 'Groupe', 'Message', 'Source'])
     
     for log in queryset:
         writer.writerow([
@@ -154,6 +181,7 @@ def export_logs_csv(request):
             log.robot_id,
             log.level,
             log.log_type,
+            log.group.name if log.group else '',
             log.message,
             log.source
         ])
@@ -205,6 +233,14 @@ class ImportMDFView(View):
                     if os.path.getsize(tmp_path) == 0:
                         raise ValueError("Le fichier temporaire est vide")
                     
+                    # Créer un groupe pour les logs importés
+                    log_group = LogGroup(
+                        name=f"Import MDF: {mdf_file.name}",
+                        description=f"Logs générés depuis le fichier MDF {mdf_file.name}",
+                        robot_id=None  # Sera détecté automatiquement
+                    )
+                    log_group.save()
+                    
                     # Traiter le fichier MDF
                     parser = MDFParser(tmp_path, mdf_file)
                     
@@ -213,16 +249,37 @@ class ImportMDFView(View):
                         # Stocker le chemin du fichier temporaire dans la session
                         request.session['tmp_mdf_path'] = tmp_path
                         request.session['mdf_file_id'] = mdf_file.id
+                        request.session['log_group_id'] = log_group.id  # Sauvegarder aussi l'ID du groupe
                         logger.info("Redirection vers la prévisualisation")
                         return redirect('robot_logs:preview_mdf')
                     
                     # Sinon, traiter directement le fichier
                     logger.info("Traitement direct du fichier MDF")
-                    stats = parser.process_file()
+                    stats = parser.process_file(log_group=log_group)  # Passage du groupe au parser
                     parser.close()
                     
                     # Supprimer le fichier temporaire
                     os.unlink(tmp_path)
+                    
+                    # Associer le groupe aux logs importés
+                    if stats.get('text_logs', 0) > 0 or stats.get('curve_logs', 0) > 0 or stats.get('laser_logs', 0) > 0 or stats.get('image_logs', 0) > 0:
+                        # Récupérer tous les logs générés par cet import
+                        imported_logs = RobotLog.objects.filter(source=f"MDF Import: {mdf_file.name}")
+                        imported_logs.update(group=log_group)
+                        
+                        # Associer le groupe au fichier MDF
+                        mdf_file.log_group = log_group
+                        mdf_file.save()
+                    
+                    # Récupérer les logs orphelins qui pourraient avoir été créés sans groupe
+                    orphan_logs = RobotLog.objects.filter(
+                        source__startswith=f"MDF Import: {mdf_file.name}",
+                        group__isnull=True
+                    )
+                    if orphan_logs.exists():
+                        # Associer ces logs au groupe
+                        orphan_logs.update(group=log_group)
+                        logger.info(f"Associé {orphan_logs.count()} logs orphelins au groupe {log_group.name}")
                     
                     # Afficher un message de succès
                     messages.success(
@@ -231,10 +288,11 @@ class ImportMDFView(View):
                         f"{stats.get('text_logs', 0)} logs textuels, "
                         f"{stats.get('curve_logs', 0)} courbes, "
                         f"{stats.get('laser_logs', 0)} scans laser, "
-                        f"{stats.get('image_logs', 0)} images importés."
+                        f"{stats.get('image_logs', 0)} images importés. "
+                        f"Groupe '{log_group.name}' créé."
                     )
                     
-                    return redirect('robot_logs:log_list')
+                    return redirect('robot_logs:log_group_detail', pk=log_group.id)
                     
                 except Exception as e:
                     # Journaliser l'erreur
@@ -273,6 +331,7 @@ class PreviewMDFView(View):
         # Récupérer le chemin du fichier temporaire et l'ID du fichier MDF depuis la session
         tmp_path = request.session.get('tmp_mdf_path')
         mdf_file_id = request.session.get('mdf_file_id')
+        log_group_id = request.session.get('log_group_id')  # Récupérer l'ID du groupe
         
         if not tmp_path or not mdf_file_id:
             messages.error(request, "Aucun fichier MDF en attente d'importation")
@@ -281,6 +340,11 @@ class PreviewMDFView(View):
         try:
             # Récupérer l'objet MDFFile
             mdf_file = get_object_or_404(MDFFile, id=mdf_file_id)
+            
+            # Récupérer le groupe si présent
+            log_group = None
+            if log_group_id:
+                log_group = get_object_or_404(LogGroup, id=log_group_id)
             
             # Créer le parser MDF
             parser = MDFParser(tmp_path, mdf_file)
@@ -308,7 +372,8 @@ class PreviewMDFView(View):
                 'mdf_file': mdf_file,
                 'channel_count': len(channels),
                 'channels': channel_infos,
-                'limited_preview': len(channels) > 100
+                'limited_preview': len(channels) > 100,
+                'log_group': log_group  # Ajouter le groupe au contexte
             })
             
         except Exception as e:
@@ -325,6 +390,8 @@ class PreviewMDFView(View):
                 del request.session['tmp_mdf_path']
             if 'mdf_file_id' in request.session:
                 del request.session['mdf_file_id']
+            if 'log_group_id' in request.session:
+                del request.session['log_group_id']
             
             # Afficher un message d'erreur
             messages.error(request, f"Erreur lors de la prévisualisation : {str(e)}")
@@ -335,6 +402,7 @@ class PreviewMDFView(View):
         # Récupérer le chemin du fichier temporaire et l'ID du fichier MDF depuis la session
         tmp_path = request.session.get('tmp_mdf_path')
         mdf_file_id = request.session.get('mdf_file_id')
+        log_group_id = request.session.get('log_group_id')  # Récupérer l'ID du groupe
         
         if not tmp_path or not mdf_file_id:
             messages.error(request, "Aucun fichier MDF en attente d'importation")
@@ -344,11 +412,24 @@ class PreviewMDFView(View):
             # Récupérer l'objet MDFFile
             mdf_file = get_object_or_404(MDFFile, id=mdf_file_id)
             
+            # Récupérer le groupe
+            log_group = None
+            if log_group_id:
+                log_group = get_object_or_404(LogGroup, id=log_group_id)
+            else:
+                # Créer un groupe pour les logs importés si aucun n'existe
+                log_group = LogGroup(
+                    name=f"Import MDF: {mdf_file.name}",
+                    description=f"Logs générés depuis le fichier MDF {mdf_file.name}",
+                    robot_id=None  # Sera détecté automatiquement
+                )
+                log_group.save()
+            
             # Créer le parser MDF
             parser = MDFParser(tmp_path, mdf_file)
             
             # Traiter le fichier
-            stats = parser.process_file()
+            stats = parser.process_file(log_group=log_group)  # Passage du groupe au parser
             parser.close()
             
             # Supprimer le fichier temporaire
@@ -357,6 +438,28 @@ class PreviewMDFView(View):
             # Supprimer les entrées de session
             del request.session['tmp_mdf_path']
             del request.session['mdf_file_id']
+            if 'log_group_id' in request.session:
+                del request.session['log_group_id']
+            
+            # Associer le groupe aux logs importés
+            if stats.get('text_logs', 0) > 0 or stats.get('curve_logs', 0) > 0 or stats.get('laser_logs', 0) > 0 or stats.get('image_logs', 0) > 0:
+                # Récupérer tous les logs générés par cet import
+                imported_logs = RobotLog.objects.filter(source=f"MDF Import: {mdf_file.name}")
+                imported_logs.update(group=log_group)
+                
+                # Associer le groupe au fichier MDF
+                mdf_file.log_group = log_group
+                mdf_file.save()
+            
+            # Récupérer les logs orphelins qui pourraient avoir été créés sans groupe
+            orphan_logs = RobotLog.objects.filter(
+                source__startswith=f"MDF Import: {mdf_file.name}",
+                group__isnull=True
+            )
+            if orphan_logs.exists():
+                # Associer ces logs au groupe
+                orphan_logs.update(group=log_group)
+                logger.info(f"Associé {orphan_logs.count()} logs orphelins au groupe {log_group.name}")
             
             # Afficher un message de succès
             messages.success(
@@ -365,10 +468,11 @@ class PreviewMDFView(View):
                 f"{stats.get('text_logs', 0)} logs textuels, "
                 f"{stats.get('curve_logs', 0)} courbes, "
                 f"{stats.get('laser_logs', 0)} scans laser, "
-                f"{stats.get('image_logs', 0)} images importés."
+                f"{stats.get('image_logs', 0)} images importés. "
+                f"Groupe '{log_group.name}' créé."
             )
             
-            return redirect('robot_logs:log_list')
+            return redirect('robot_logs:log_group_detail', pk=log_group.id)
             
         except Exception as e:
             # En cas d'erreur, nettoyer
@@ -384,6 +488,8 @@ class PreviewMDFView(View):
                 del request.session['tmp_mdf_path']
             if 'mdf_file_id' in request.session:
                 del request.session['mdf_file_id']
+            if 'log_group_id' in request.session:
+                del request.session['log_group_id']
             
             # Afficher un message d'erreur
             messages.error(request, f"Erreur lors de l'importation : {str(e)}")
