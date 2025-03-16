@@ -82,31 +82,6 @@ def _process_curve_data(self, channel_name, signal):
     }
     main_log.set_metadata_from_dict(metadata)
     
-    # Générer un graphique de la courbe pour prévisualisation
-    try:
-        import matplotlib.pyplot as plt
-        plt.figure(figsize=(10, 6))
-        plt.plot(signal.timestamps, signal.samples)
-        plt.title(f"Courbe: {channel_name}")
-        plt.xlabel("Temps (s)")
-        plt.ylabel(signal.unit if hasattr(signal, 'unit') else "Valeur")
-        plt.grid(True)
-        
-        # Sauvegarder l'image dans un buffer
-        img_buffer = io.BytesIO()
-        plt.savefig(img_buffer, format='PNG')
-        img_buffer.seek(0)
-        plt.close()
-        
-        # Attacher l'image au log
-        main_log.data_file.save(
-            f"{channel_name}_preview.png",
-            ContentFile(img_buffer.getvalue()),
-            save=False
-        )
-    except Exception as e:
-        logger.error(f"Erreur lors de la génération du graphique pour {channel_name}: {e}")
-    
     # Créer les mesures de courbe associées
     curve_measurements = []
     for i, (ts, value) in enumerate(zip(signal.timestamps, signal.samples)):
@@ -162,37 +137,6 @@ def _process_laser_data(self, channel_name, signal):
     range_data = signal.samples.tolist()
     laser_scan.set_range_data_from_list(range_data)
     
-    # Générer une visualisation du scan laser
-    try:
-        import matplotlib.pyplot as plt
-        
-        # Créer un graphique polaire
-        fig = plt.figure(figsize=(8, 8))
-        ax = fig.add_subplot(111, projection='polar')
-        
-        # Calculer les angles pour chaque mesure
-        angles = np.linspace(angle_min, angle_max, len(range_data))
-        
-        # Tracer les points du scan
-        ax.scatter(angles, range_data, s=2)
-        ax.set_title(f"Scan Laser: {channel_name}")
-        ax.grid(True)
-        
-        # Sauvegarder l'image dans un buffer
-        img_buffer = io.BytesIO()
-        plt.savefig(img_buffer, format='PNG')
-        img_buffer.seek(0)
-        plt.close()
-        
-        # Attacher l'image au log
-        main_log.data_file.save(
-            f"{channel_name}_laser_preview.png",
-            ContentFile(img_buffer.getvalue()),
-            save=False
-        )
-    except Exception as e:
-        logger.error(f"Erreur lors de la génération de la visualisation laser pour {channel_name}: {e}")
-    
     return main_log, laser_scan
 
 def _process_image_data(self, channel_name, signal):
@@ -235,13 +179,6 @@ def _process_image_data(self, channel_name, signal):
         # Sauvegarder l'image dans le champ image_file
         image_obj.image_file.save(
             f"{channel_name}_image.jpg",
-            ContentFile(img_io.getvalue()),
-            save=False
-        )
-        
-        # Utiliser la même image comme aperçu pour le log
-        main_log.data_file.save(
-            f"{channel_name}_image_preview.jpg",
             ContentFile(img_io.getvalue()),
             save=False
         )
@@ -337,48 +274,6 @@ def _process_can_data(self, channel_name, signal):
                         can_message.signals_data = signals
                 
                 can_messages.append(can_message)
-        
-        # Si des messages ont été extraits, générer un aperçu
-        if can_messages:
-            try:
-                # Générer un aperçu des données CAN (par exemple, distribution des ID)
-                import matplotlib.pyplot as plt
-                
-                # Compter les occurrences de chaque ID
-                id_counter = Counter([msg.can_id for msg in can_messages])
-                ids = list(id_counter.keys())
-                counts = list(id_counter.values())
-                
-                # Créer un histogramme
-                plt.figure(figsize=(10, 6))
-                bars = plt.bar(range(len(ids)), counts, tick_label=ids)
-                plt.xticks(rotation=45, ha='right')
-                plt.title(f"Distribution des ID CAN dans {channel_name}")
-                plt.xlabel("ID CAN")
-                plt.ylabel("Nombre de messages")
-                plt.tight_layout()
-                
-                # Ajouter les valeurs au-dessus des barres
-                for bar in bars:
-                    height = bar.get_height()
-                    plt.text(bar.get_x() + bar.get_width()/2., height,
-                            f'{int(height)}',
-                            ha='center', va='bottom')
-                
-                # Sauvegarder l'image dans un buffer
-                img_buffer = io.BytesIO()
-                plt.savefig(img_buffer, format='PNG')
-                img_buffer.seek(0)
-                plt.close()
-                
-                # Attacher l'image au log
-                main_log.data_file.save(
-                    f"{channel_name}_can_preview.png",
-                    ContentFile(img_buffer.getvalue()),
-                    save=False
-                )
-            except Exception as e:
-                logger.error(f"Erreur lors de la génération de l'aperçu CAN pour {channel_name}: {e}")
         
         return main_log, can_messages
         
