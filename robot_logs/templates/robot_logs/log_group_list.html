@@ -1,28 +1,101 @@
 {% extends 'robot_logs/base.html' %}
 {% load static %}
+{% load robot_logs_extras %}
 
-{% block title %}Groupes de logs{% endblock %}
+{% block title %}LogViewer - Tableau de bord{% endblock %}
 
 {% block content %}
-<div class="container mt-4">
-    <div class="d-flex justify-content-between align-items-center">
-        <h1>Groupes de logs</h1>
-        <button type="button" class="btn btn-primary" data-bs-toggle="modal" data-bs-target="#createGroupModal">
-            <i class="fas fa-plus"></i> Nouveau groupe
-        </button>
+<div class="container-fluid mt-4">
+    <div class="row mb-4">
+        <div class="col-12">
+            <div class="d-flex justify-content-between align-items-center">
+                <h1>Tableau de bord</h1>
+                <div>
+                    <a href="{% url 'robot_logs:import_mdf' %}" class="btn btn-success me-2">
+                        <i class="fas fa-upload"></i> Importer MDF
+                    </a>
+                    <button type="button" class="btn btn-primary" data-bs-toggle="modal" data-bs-target="#createGroupModal">
+                        <i class="fas fa-plus"></i> Nouveau groupe
+                    </button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Statistiques générales -->
+    <div class="row mb-4">
+        <div class="col-md-3">
+            <div class="card bg-primary text-white">
+                <div class="card-body">
+                    <h5 class="card-title">Total Groupes</h5>
+                    <h2 class="display-4">{{ total_groups }}</h2>
+                </div>
+                <div class="card-footer">
+                    <small>Groupes de logs créés</small>
+                </div>
+            </div>
+        </div>
+        <div class="col-md-3">
+            <div class="card bg-success text-white">
+                <div class="card-body">
+                    <h5 class="card-title">Total Logs</h5>
+                    <h2 class="display-4">{{ total_logs }}</h2>
+                </div>
+                <div class="card-footer">
+                    <small>{{ logs_in_groups }} logs dans des groupes, {{ orphan_logs }} logs orphelins</small>
+                </div>
+            </div>
+        </div>
+        <div class="col-md-3">
+            <div class="card bg-info text-white">
+                <div class="card-body">
+                    <h5 class="card-title">Fichiers MDF</h5>
+                    <h2 class="display-4">{{ mdf_files_count }}</h2>
+                </div>
+                <div class="card-footer">
+                    <small>Fichiers importés</small>
+                </div>
+            </div>
+        </div>
+        <div class="col-md-3">
+            <div class="card bg-warning text-dark">
+                <div class="card-body">
+                    <h5 class="card-title">Types de logs</h5>
+                    <div class="d-flex justify-content-around">
+                        {% for log_type, count in log_types_count.items %}
+                            {% if count > 0 %}
+                            <span title="{{ log_types_dict|get_item:log_type }}">{{ log_type }}: {{ count }}</span>
+                            {% endif %}
+                        {% endfor %}
+                    </div>
+                </div>
+                <div class="card-footer">
+                    <small>Niveaux: 
+                        {% for level, count in log_levels_count.items %}
+                            {% if count > 0 %}
+                            <span class="badge {% if level == 'DEBUG' %}bg-secondary{% elif level == 'INFO' %}bg-info{% elif level == 'WARNING' %}bg-warning{% elif level == 'ERROR' %}bg-danger{% elif level == 'CRITICAL' %}bg-dark{% endif %}">
+                                {{ level }}: {{ count }}
+                            </span>
+                            {% endif %}
+                        {% endfor %}
+                    </small>
+                </div>
+            </div>
+        </div>
     </div>
     
-    <div class="row mt-3">
+    <div class="row">
         <div class="col-md-3">
             <div class="card">
                 <div class="card-header">
                     <h5>Filtres</h5>
                 </div>
                 <div class="card-body">
-                    <form method="get" action="{% url 'robot_logs:log_group_list' %}">
+                    <form method="get" action="{% url 'robot_logs:home' %}">
                         <div class="mb-3">
                             <label for="search" class="form-label">Recherche</label>
                             <input type="text" class="form-control" id="search" name="search" value="{{ request.GET.search|default:'' }}">
+                            <div class="form-text">Rechercher dans les noms, descriptions et tags</div>
                         </div>
                         
                         {% if robot_ids %}
@@ -49,9 +122,31 @@
                         </div>
                         {% endif %}
                         
-                        <button type="submit" class="btn btn-primary">Filtrer</button>
-                        <a href="{% url 'robot_logs:log_group_list' %}" class="btn btn-secondary">Réinitialiser</a>
+                        <div class="d-grid gap-2">
+                            <button type="submit" class="btn btn-primary">Filtrer</button>
+                            <a href="{% url 'robot_logs:home' %}" class="btn btn-secondary">Réinitialiser</a>
+                        </div>
                     </form>
+                </div>
+            </div>
+            
+            <!-- Liens rapides -->
+            <div class="card mt-3">
+                <div class="card-header">
+                    <h5>Actions rapides</h5>
+                </div>
+                <div class="card-body">
+                    <div class="d-grid gap-2">
+                        <a href="{% url 'robot_logs:log_list' %}" class="btn btn-outline-primary">
+                            <i class="bi bi-list-ul"></i> Voir tous les logs
+                        </a>
+                        <a href="{% url 'robot_logs:import_mdf' %}" class="btn btn-outline-success">
+                            <i class="fas fa-upload"></i> Importer un fichier MDF
+                        </a>
+                        <a href="{% url 'robot_logs:multi_curve_view' %}" class="btn btn-outline-info">
+                            <i class="bi bi-graph-up"></i> Comparer des courbes
+                        </a>
+                    </div>
                 </div>
             </div>
         </div>
@@ -59,13 +154,13 @@
         <div class="col-md-9">
             <div class="card">
                 <div class="card-header">
-                    <h5>Groupes ({{ log_groups|length }})</h5>
+                    <h5>Groupes de logs ({{ log_groups|length }})</h5>
                 </div>
                 <div class="card-body">
                     {% if log_groups %}
                     <div class="table-responsive">
                         <table class="table table-hover">
-                            <thead>
+                            <thead class="table-light">
                                 <tr>
                                     <th>Nom</th>
                                     <th>Robot ID</th>
@@ -79,12 +174,17 @@
                                 {% for group in log_groups %}
                                 <tr>
                                     <td>
-                                        <a href="{% url 'robot_logs:log_group_detail' pk=group.id %}">
+                                        <a href="{% url 'robot_logs:log_group_detail' pk=group.id %}" class="text-decoration-none">
                                             {{ group.name }}
                                         </a>
+                                        {% if group.description %}
+                                        <br><small class="text-muted">{{ group.description|truncatechars:50 }}</small>
+                                        {% endif %}
                                     </td>
                                     <td>{{ group.robot_id|default:"-" }}</td>
-                                    <td>{{ group.get_log_count }}</td>
+                                    <td class="text-center">
+                                        <span class="badge bg-secondary">{{ group.get_log_count }}</span>
+                                    </td>
                                     <td>
                                         {% if group.start_time %}
                                             {{ group.start_time|date:"d/m/Y H:i" }}
@@ -107,13 +207,13 @@
                                     </td>
                                     <td>
                                         <div class="btn-group">
-                                            <a href="{% url 'robot_logs:log_group_detail' pk=group.id %}" class="btn btn-sm btn-outline-primary">
+                                            <a href="{% url 'robot_logs:log_group_detail' pk=group.id %}" class="btn btn-sm btn-outline-primary" title="Voir">
                                                 <i class="fas fa-eye"></i>
                                             </a>
-                                            <a href="{% url 'robot_logs:log_group_update' pk=group.id %}" class="btn btn-sm btn-outline-secondary">
+                                            <a href="{% url 'robot_logs:log_group_update' pk=group.id %}" class="btn btn-sm btn-outline-secondary" title="Modifier">
                                                 <i class="fas fa-edit"></i>
                                             </a>
-                                            <a href="{% url 'robot_logs:log_group_delete' pk=group.id %}" class="btn btn-sm btn-outline-danger">
+                                            <a href="{% url 'robot_logs:log_group_delete' pk=group.id %}" class="btn btn-sm btn-outline-danger" title="Supprimer">
                                                 <i class="fas fa-trash"></i>
                                             </a>
                                         </div>
@@ -168,7 +268,16 @@
                     
                     {% else %}
                     <div class="alert alert-info">
-                        Aucun groupe de logs trouvé. Créez un nouveau groupe pour organiser vos logs.
+                        Aucun groupe de logs trouvé. Créez un nouveau groupe pour organiser vos logs ou importez un fichier MDF.
+                    </div>
+                    <div class="text-center">
+                        <button type="button" class="btn btn-primary mb-2" data-bs-toggle="modal" data-bs-target="#createGroupModal">
+                            <i class="fas fa-plus"></i> Créer un groupe
+                        </button>
+                        <br>
+                        <a href="{% url 'robot_logs:import_mdf' %}" class="btn btn-success">
+                            <i class="fas fa-upload"></i> Importer un fichier MDF
+                        </a>
                     </div>
                     {% endif %}
                 </div>
@@ -214,4 +323,22 @@
         </div>
     </div>
 </div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+    // Vérifie s'il existe au moins un groupe de logs, si non, affiche automatiquement le modal de création
+    document.addEventListener('DOMContentLoaded', function() {
+        {% if not log_groups %}
+            // Si aucun paramètre de filtre n'est actif
+            {% if not request.GET.search and not request.GET.robot_id and not request.GET.tag %}
+                // Ouvrir automatiquement le modal après un court délai
+                setTimeout(function() {
+                    var createGroupModal = new bootstrap.Modal(document.getElementById('createGroupModal'));
+                    createGroupModal.show();
+                }, 500);
+            {% endif %}
+        {% endif %}
+    });
+</script>
 {% endblock %}
