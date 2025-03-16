@@ -1,6 +1,6 @@
 """
 Module pour parser les fichiers MDF (Measurement Data Format) de Vector.
-Version améliorée pour gérer les canaux dupliqués et les données CAN.
+Version améliorée pour gérer les canaux dupliqués, les données CAN et les channel groups.
 """
 import os
 import json
@@ -37,6 +37,7 @@ class MDFParser:
         self._mdf = None
         self._dbc_parser = None
         self._log_group = None
+        self._channel_group_map = {}  # Map pour associer group_index -> LogGroup
         
     def open(self):
         """Ouvre le fichier MDF"""
@@ -89,6 +90,36 @@ class MDFParser:
         
         return unique_channels
     
+    def get_channel_groups(self):
+        """Récupère les informations sur les channel groups du fichier MDF"""
+        if not self._mdf:
+            if not self.open():
+                return {}
+        
+        # Extraire les channel groups
+        groups_info = {}
+        
+        # Parcourir tous les groups dans le MDF
+        for group_index, group in enumerate(self._mdf.groups):
+            # Récupérer les informations de base sur le groupe
+            group_info = {
+                'index': group_index,
+                'channel_count': len(group.channels),
+                'channels': [],
+                'comment': group.comment if hasattr(group, 'comment') else '',
+                'record_count': group.record_count if hasattr(group, 'record_count') else 0,
+            }
+            
+            # Récupérer les noms des canaux dans ce groupe
+            for ch in group.channels:
+                if hasattr(ch, 'name') and ch.name:
+                    if ch.name.lower() not in ('time', 'timestamp'):
+                        group_info['channels'].append(ch.name)
+            
+            groups_info[group_index] = group_info
+        
+        return groups_info
+    
     def _find_channel_location(self, channel_name):
         """
         Trouve la localisation (groupe, index) d'un canal dans le fichier MDF.
@@ -122,6 +153,7 @@ class MDFParser:
                     'comment': signal.comment if hasattr(signal, 'comment') else '',
                     'samples_count': len(signal.samples) if hasattr(signal, 'samples') else 0,
                     'data_type': str(signal.samples.dtype) if hasattr(signal, 'samples') else '',
+                    'channel_group': group,  # Ajouter l'index du channel group
                 }
             else:
                 logger.error(f"Canal {channel_name} non trouvé dans le fichier MDF")
@@ -141,6 +173,53 @@ class MDFParser:
         _process_text_event, _process_curve_data, _process_laser_data,
         _process_image_data, _process_can_data
     )
+    
+    def get_or_create_channel_group_log_group(self, group_index):
+        """
+        Récupère ou crée un LogGroup pour un channel group spécifique.
+        
+        Args:
+            group_index: Index du channel group dans le fichier MDF
+            
+        Returns:
+            Instance de LogGroup
+        """
+        # Si déjà mappé, retourner directement
+        if group_index in self._channel_group_map:
+            return self._channel_group_map[group_index]
+        
+        # Si aucun groupe parent n'existe, on ne peut pas créer de sous-groupe
+        if not self._log_group:
+            return None
+        
+        # Créer un nouveau LogGroup pour ce channel group
+        channel_group_name = f"Channel Group {group_index}"
+        
+        # Récupérer des informations sur le channel group si disponibles
+        group_info = ""
+        if self._mdf and group_index < len(self._mdf.groups):
+            group = self._mdf.groups[group_index]
+            if hasattr(group, 'comment') and group.comment:
+                group_info = group.comment
+            if hasattr(group, 'record_count'):
+                group_info += f" ({group.record_count} records)"
+        
+        channel_group = LogGroup(
+            name=f"{self._log_group.name} - {channel_group_name}",
+            description=f"Channel Group {group_index} du fichier MDF: {self.mdf_file.name if self.mdf_file else 'Unknown'}\n{group_info}",
+            robot_id=self._log_group.robot_id,
+            is_channel_group=True,
+            channel_group_index=group_index,
+            parent_group=self._log_group,
+        )
+        channel_group.save()
+        
+        # Ajouter à la map
+        self._channel_group_map[group_index] = channel_group
+        
+        logger.info(f"Créé LogGroup pour channel group {group_index}: {channel_group.name}")
+        
+        return channel_group
     
     def process_channel(self, channel_name):
         """
@@ -169,39 +248,54 @@ class MDFParser:
                     message=f"Canal {channel_name} non trouvé dans le fichier MDF",
                     source=f"MDF Import: {self.mdf_file.name if self.mdf_file else 'Unknown'}",
                     log_type="TEXT",
-                    group=self._log_group  # Assignation au groupe
+                    group=self._log_group  # Assignation au groupe principal
                 )
                 return [error_log], [], [], [], []
             
-            group, index = location
-            signal = self._mdf.get(channel_name, group=group, index=index)
+            group_index, channel_index = location
+            signal = self._mdf.get(channel_name, group=group_index, index=channel_index)
+            
+            # Déterminer le groupe de logs approprié (principal ou channel group)
+            log_group = self._log_group
+            
+            # Si l'organisation par channel group est activée, utiliser le bon sous-groupe
+            if hasattr(self, '_use_channel_groups') and self._use_channel_groups:
+                # Récupérer ou créer le LogGroup pour ce channel group
+                channel_group_log_group = self.get_or_create_channel_group_log_group(group_index)
+                if channel_group_log_group:
+                    log_group = channel_group_log_group
             
             # Déterminer le type de données
             if self._is_text_event(channel_name, signal):
                 logs = self._process_text_event(channel_name, signal)
-                # Associer les logs au groupe
+                # Associer les logs au groupe et ajouter l'index du channel group
                 for log in logs:
-                    log.group = self._log_group
+                    log.group = log_group
+                    log.channel_group_index = group_index
                 return logs, [], [], [], []
                 
             elif self._is_curve_data(channel_name, signal):
                 main_log, curve_measurements = self._process_curve_data(channel_name, signal)
-                main_log.group = self._log_group  # Assignation au groupe
+                main_log.group = log_group  # Assignation au groupe
+                main_log.channel_group_index = group_index
                 return [main_log], curve_measurements, [], [], []
                 
             elif self._is_laser_data(channel_name, signal):
                 main_log, laser_scan = self._process_laser_data(channel_name, signal)
-                main_log.group = self._log_group  # Assignation au groupe
+                main_log.group = log_group  # Assignation au groupe
+                main_log.channel_group_index = group_index
                 return [main_log], [], [laser_scan], [], []
                 
             elif self._is_image_data(channel_name, signal):
                 main_log, image = self._process_image_data(channel_name, signal)
-                main_log.group = self._log_group  # Assignation au groupe
+                main_log.group = log_group  # Assignation au groupe
+                main_log.channel_group_index = group_index
                 return [main_log], [], [], [image] if image else [], []
                 
             elif self._is_can_data(channel_name, signal):
                 main_log, can_messages = self._process_can_data(channel_name, signal)
-                main_log.group = self._log_group  # Assignation au groupe
+                main_log.group = log_group  # Assignation au groupe
+                main_log.channel_group_index = group_index
                 return [main_log], [], [], [], can_messages
                 
             else:
@@ -213,7 +307,8 @@ class MDFParser:
                     message=f"Données non classifiées pour {channel_name}",
                     source=f"MDF Import: {self.mdf_file.name if self.mdf_file else 'Unknown'}",
                     log_type="TEXT",
-                    group=self._log_group  # Assignation au groupe
+                    group=log_group,  # Assignation au groupe
+                    channel_group_index=group_index
                 )
                 
                 # Ajouter des métadonnées
@@ -222,7 +317,8 @@ class MDFParser:
                     'samples_count': len(signal.samples),
                     'data_type': str(signal.samples.dtype),
                     'unit': signal.unit if hasattr(signal, 'unit') else None,
-                    'group_id': self._log_group.id if self._log_group else None,  # Ajouter l'ID du groupe
+                    'group_id': log_group.id if log_group else None,
+                    'channel_group_index': group_index,
                 }
                 log.set_metadata_from_dict(metadata)
                 
@@ -238,17 +334,18 @@ class MDFParser:
                 message=f"Erreur lors du traitement du canal {channel_name}: {e}",
                 source=f"MDF Import: {self.mdf_file.name if self.mdf_file else 'Unknown'}",
                 log_type="TEXT",
-                group=self._log_group  # Assignation au groupe
+                group=self._log_group  # Assignation au groupe principal
             )
             return [error_log], [], [], [], []
     
-    def process_file(self, dbc_file=None, log_group=None):
+    def process_file(self, dbc_file=None, log_group=None, use_channel_groups=True):
         """
         Traite l'ensemble du fichier MDF et importe tous les canaux
         
         Args:
             dbc_file: Fichier DBC optionnel pour décoder les messages CAN
             log_group: Groupe de logs auquel associer les logs générés
+            use_channel_groups: Si True, crée des sous-groupes pour les channel groups
             
         Returns:
             Dictionnaire contenant des statistiques sur les données importées
@@ -259,6 +356,7 @@ class MDFParser:
         
         # Stocker le groupe de logs pour l'utiliser lors du traitement
         self._log_group = log_group
+        self._use_channel_groups = use_channel_groups
         
         # Initialiser le parseur DBC si un fichier est fourni
         if dbc_file:
@@ -270,6 +368,7 @@ class MDFParser:
         
         statistics = {
             'total_channels': 0,
+            'channel_groups': 0,
             'text_logs': 0,
             'curve_logs': 0,
             'laser_logs': 0,
@@ -280,6 +379,17 @@ class MDFParser:
             'can_signals': 0,
             'errors': 0
         }
+        
+        # Si use_channel_groups est activé, analyser et créer les metadata pour les channel groups
+        if use_channel_groups and self.mdf_file and log_group:
+            channel_groups_info = self.get_channel_groups()
+            statistics['channel_groups'] = len(channel_groups_info)
+            
+            # Enregistrer les informations sur les channel groups dans le MDFFile
+            self.mdf_file.set_channel_groups_info(channel_groups_info)
+            self.mdf_file.save()
+            
+            logger.info(f"Identifié {len(channel_groups_info)} channel groups dans le fichier MDF")
         
         # Récupérer tous les canaux (version améliorée qui filtre les canaux de temps)
         channels = self.get_channels()
@@ -346,6 +456,20 @@ class MDFParser:
                     logger.error(f"Erreur lors de la sauvegarde des données pour {channel_name}: {e}")
                     statistics['errors'] += 1
         
+        # Si nous utilisons des channel groups, mettre à jour les dates de début et de fin
+        if use_channel_groups and len(self._channel_group_map) > 0:
+            for channel_group in self._channel_group_map.values():
+                # Trouver le premier et le dernier log de ce groupe
+                first_log = RobotLog.objects.filter(group=channel_group).order_by('timestamp').first()
+                last_log = RobotLog.objects.filter(group=channel_group).order_by('-timestamp').first()
+                
+                if first_log:
+                    channel_group.start_time = first_log.timestamp
+                if last_log:
+                    channel_group.end_time = last_log.timestamp
+                
+                channel_group.save()
+        
         # Après avoir traité tous les canaux, vérifier si des données n'ont pas été associées au groupe
         if log_group and self.mdf_file:
             # Récupérer tous les logs importés pour ce fichier MDF
@@ -353,8 +477,24 @@ class MDFParser:
             imported_logs = RobotLog.objects.filter(source=source_pattern, group__isnull=True)
             
             # Forcer l'association au groupe pour tous les logs orphelins
-            count = imported_logs.update(group=log_group)
-            logger.info(f"Associé {count} logs orphelins au groupe {log_group.name}")
+            if use_channel_groups:
+                # Pour chaque log orphelin, l'associer au bon channel group s'il a un channel_group_index
+                for log in imported_logs:
+                    if hasattr(log, 'channel_group_index') and log.channel_group_index is not None:
+                        channel_group = self.get_or_create_channel_group_log_group(log.channel_group_index)
+                        if channel_group:
+                            log.group = channel_group
+                            log.save()
+                        else:
+                            log.group = log_group
+                            log.save()
+                    else:
+                        log.group = log_group
+                        log.save()
+            else:
+                # Version simple : tous au groupe principal
+                count = imported_logs.update(group=log_group)
+                logger.info(f"Associé {count} logs orphelins au groupe {log_group.name}")
             
             # Mettre à jour manuellement les données associées
             for log in RobotLog.objects.filter(source=source_pattern):
@@ -377,5 +517,8 @@ class MDFParser:
             if log_group:
                 self.mdf_file.log_group = log_group
             self.mdf_file.save()
+        
+        # Ajouter le nombre de channel groups créés aux statistiques
+        statistics['channel_groups_created'] = len(self._channel_group_map)
             
         return statistics
