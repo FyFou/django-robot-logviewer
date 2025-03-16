@@ -50,6 +50,14 @@
                     <div class="form-text">{{ form.preview_first.help_text }}</div>
                 </div>
                 
+                <div class="mb-3 form-check">
+                    {{ form.use_channel_groups }}
+                    <label class="form-check-label" for="{{ form.use_channel_groups.id_for_label }}">
+                        {{ form.use_channel_groups.label }}
+                    </label>
+                    <div class="form-text">{{ form.use_channel_groups.help_text }}</div>
+                </div>
+                
                 <div class="text-center">
                     <button type="submit" class="btn btn-success">Importer</button>
                 </div>
@@ -79,6 +87,27 @@
             <p>
                 Une fois importés, ces différents types de données seront disponibles dans l'interface LogViewer 
                 avec des visualisations adaptées.
+            </p>
+        </div>
+    </div>
+    
+    <div class="card mt-4">
+        <div class="card-header">
+            Channel Groups
+        </div>
+        <div class="card-body">
+            <p>
+                Les fichiers MDF organisent les données en "channel groups" qui regroupent des canaux de mesure liés.
+                L'activation de l'option "Utiliser les channel groups" permet de :
+            </p>
+            <ul>
+                <li>Créer des sous-groupes automatiquement pour chaque channel group dans le fichier MDF</li>
+                <li>Organiser hiérarchiquement les logs par origine de canal</li>
+                <li>Faciliter la navigation et l'analyse des données structurées</li>
+            </ul>
+            <p>
+                Ces sous-groupes seront créés sous le groupe principal d'importation et contiendront 
+                tous les logs issus des canaux appartenant au channel group correspondant.
             </p>
         </div>
     </div>
