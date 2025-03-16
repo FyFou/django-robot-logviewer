@@ -24,13 +24,11 @@ class LogGroup(models.Model):
     def get_absolute_url(self):
         return reverse('robot_logs:log_group_detail', args=[self.id])
     
-    @property
-    def log_count(self):
+    def get_log_count(self):
         """Retourne le nombre de logs dans ce groupe"""
         return self.logs.count()
     
-    @property
-    def log_types_summary(self):
+    def get_log_types_summary(self):
         """Retourne un résumé des types de logs dans ce groupe"""
         types = self.logs.values_list('log_type', flat=True)
         summary = {}
