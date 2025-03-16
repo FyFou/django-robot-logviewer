@@ -22,8 +22,8 @@ class LogGroupListView(ListView):
     paginate_by = 20
     
     def get_queryset(self):
-        """Retourne les groupes avec des annotations pour le nombre de logs"""
-        queryset = super().get_queryset()
+        """Retourne les groupes avec un tri explicite"""
+        queryset = super().get_queryset().order_by('-created_at')
         
         # Filtrer par tag si fourni
         tag = self.request.GET.get('tag')
@@ -44,13 +44,6 @@ class LogGroupListView(ListView):
                 Q(tags__icontains=search)
             )
             
-        # Ajouter des annotations pour obtenir des statistiques
-        queryset = queryset.annotate(
-            log_count=Count('logs'),
-            first_log_date=Min('logs__timestamp'),
-            last_log_date=Max('logs__timestamp')
-        )
-        
         return queryset
         
     def get_context_data(self, **kwargs):
@@ -107,6 +100,10 @@ class LogGroupDetailView(DetailView):
         context['log_count'] = logs.count()
         context['log_types_count'] = {log_type: count for log_type, count in logs.values_list('log_type').annotate(count=Count('id'))}
         context['log_levels_count'] = {level: count for level, count in logs.values_list('level').annotate(count=Count('id'))}
+        
+        # Ajouter les dictionnaires de choix pour les filtres
+        context['log_levels_dict'] = dict(RobotLog.LOG_LEVELS)
+        context['log_types_dict'] = dict(RobotLog.LOG_TYPES)
         
         # Ajouter le formulaire de modification
         context['form'] = LogGroupForm(instance=log_group)
