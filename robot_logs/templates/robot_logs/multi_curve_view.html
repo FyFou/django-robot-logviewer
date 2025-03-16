@@ -69,7 +69,7 @@
                 </div>
                 
                 <!-- Champs cachés pour les configurations de courbes -->
-                {% for config in request.GET.getlist 'curve_config' %}
+                {% for config in request.GET.getlist "curve_config" %}
                     <input type="hidden" name="curve_config" value="{{ config }}">
                 {% endfor %}
             </form>
@@ -89,30 +89,32 @@
                             </thead>
                             <tbody id="selectedCurvesList">
                                 {% for curve in selected_logs %}
-                                    {% for config in request.GET.getlist 'curve_config' %}
-                                        {% if config.startswith|stringformat:"s"|add:":" in config %}
-                                            {% with axis_id=config|cut:curve.id|cut:":" %}
-                                                <tr data-config="{{ curve.id }}:{{ axis_id }}">
-                                                    <td>
-                                                        <div class="color-dot" style="background-color: 
-                                                            {% if axis_id == '1' %}#1f77b4{% endif %}
-                                                            {% if axis_id == '2' %}#ff7f0e{% endif %}
-                                                            {% if axis_id == '3' %}#2ca02c{% endif %}
-                                                            {% if axis_id == '4' %}#d62728{% endif %}
-                                                        "></div>
-                                                        {{ curve.message }}
-                                                    </td>
-                                                    <td>{{ curve.curve_measurements.first.sensor_name }}</td>
-                                                    <td>Y{{ axis_id }}</td>
-                                                    <td>
-                                                        <button type="button" class="btn btn-sm btn-danger remove-curve-btn" data-config="{{ curve.id }}:{{ axis_id }}">
-                                                            <i class="bi bi-x"></i> Retirer
-                                                        </button>
-                                                    </td>
-                                                </tr>
-                                            {% endwith %}
-                                        {% endif %}
-                                    {% endfor %}
+                                    {% with curve_id_str=curve.id|stringformat:"s" %}
+                                        {% for config in request.GET.getlist "curve_config" %}
+                                            {% if config|slice:":"|add:curve_id_str|add:":" == config %}
+                                                {% with axis_id=config|slice:curve_id_str|length|add:"1:" %}
+                                                    <tr>
+                                                        <td>
+                                                            <div class="color-dot" style="background-color: 
+                                                                {% if axis_id == '1' %}#1f77b4{% endif %}
+                                                                {% if axis_id == '2' %}#ff7f0e{% endif %}
+                                                                {% if axis_id == '3' %}#2ca02c{% endif %}
+                                                                {% if axis_id == '4' %}#d62728{% endif %}
+                                                            "></div>
+                                                            {{ curve.message }}
+                                                        </td>
+                                                        <td>{{ curve.curve_measurements.first.sensor_name }}</td>
+                                                        <td>Y{{ axis_id }}</td>
+                                                        <td>
+                                                            <button type="button" class="btn btn-sm btn-danger remove-curve-btn" data-config="{{ config }}">
+                                                                <i class="bi bi-x"></i> Retirer
+                                                            </button>
+                                                        </td>
+                                                    </tr>
+                                                {% endwith %}
+                                            {% endif %}
+                                        {% endfor %}
+                                    {% endwith %}
                                 {% endfor %}
                             </tbody>
                         </table>
