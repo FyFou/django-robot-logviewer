@@ -3,7 +3,14 @@
 {% block title %}Logs Robot - LogViewer{% endblock %}
 
 {% block content %}
-    <h1>Logs Robot</h1>
+    <div class="d-flex justify-content-between align-items-center mb-3">
+        <h1>Logs Robot</h1>
+        <div>
+            <a href="{% url 'robot_logs:log_group_list' %}" class="btn btn-outline-primary">
+                <i class="bi bi-folder"></i> Groupes de logs
+            </a>
+        </div>
+    </div>
     
     <div class="card mb-4">
         <div class="card-header">
@@ -57,57 +64,86 @@
         </div>
     </div>
     
-    <div class="d-flex justify-content-end mb-3">
-        <a href="{% url 'robot_logs:import_mdf' %}" class="btn btn-info me-2">
-            <i class="bi bi-file-earmark-plus"></i> Importer fichier MDF
-        </a>
-        {% if has_mdf_files %}
-        <a href="{% url 'robot_logs:mdf_file_list' %}" class="btn btn-outline-info me-2">
-            <i class="bi bi-file-earmark-binary"></i> Voir les fichiers MDF
-        </a>
-        {% endif %}
-        <button id="toggleRefresh" class="btn btn-primary me-2">
-            <i class="bi bi-arrow-clockwise"></i> Activer l'actualisation auto
-        </button>
-        <a href="{% url 'robot_logs:export_csv' %}?{% for key, value in request.GET.items %}{% if key != 'page' %}{{ key }}={{ value }}&{% endif %}{% endfor %}" class="btn btn-success">
-            <i class="bi bi-file-earmark-excel"></i> Exporter en CSV
-        </a>
+    <div class="d-flex justify-content-between mb-3">
+        <div>
+            <button id="selectAllBtn" class="btn btn-outline-primary me-2" onclick="toggleSelectAll()">
+                <i class="bi bi-check-all"></i> Sélectionner tout
+            </button>
+            <button class="btn btn-outline-success" data-bs-toggle="modal" data-bs-target="#assignToGroupModal">
+                <i class="bi bi-folder-plus"></i> Assigner à un groupe
+            </button>
+        </div>
+        <div>
+            <a href="{% url 'robot_logs:import_mdf' %}" class="btn btn-info me-2">
+                <i class="bi bi-file-earmark-plus"></i> Importer fichier MDF
+            </a>
+            {% if has_mdf_files %}
+            <a href="{% url 'robot_logs:mdf_file_list' %}" class="btn btn-outline-info me-2">
+                <i class="bi bi-file-earmark-binary"></i> Voir les fichiers MDF
+            </a>
+            {% endif %}
+            <button id="toggleRefresh" class="btn btn-primary me-2">
+                <i class="bi bi-arrow-clockwise"></i> Activer l'actualisation auto
+            </button>
+            <a href="{% url 'robot_logs:export_csv' %}?{% for key, value in request.GET.items %}{% if key != 'page' %}{{ key }}={{ value }}&{% endif %}{% endfor %}" class="btn btn-success">
+                <i class="bi bi-file-earmark-excel"></i> Exporter en CSV
+            </a>
+        </div>
     </div>
     
-    <div class="table-responsive">
-        <table class="table table-striped table-hover">
-            <thead>
-                <tr>
-                    <th>Date/Heure</th>
-                    <th>Robot ID</th>
-                    <th>Niveau</th>
-                    <th>Type</th>
-                    <th>Message</th>
-                    <th>Source</th>
-                </tr>
-            </thead>
-            <tbody>
-                {% for log in logs %}
-                    <tr class="log-{{ log.level|lower }}">
-                        <td>{{ log.timestamp|date:"Y-m-d H:i:s" }}</td>
-                        <td>{{ log.robot_id }}</td>
-                        <td>{{ log.level }}</td>
-                        <td>{{ log.get_log_type_display }}</td>
-                        <td>
-                            <a href="{% url 'robot_logs:log_detail' log.pk %}">
-                                {{ log.message|truncatechars:100 }}
-                            </a>
-                        </td>
-                        <td>{{ log.source }}</td>
-                    </tr>
-                {% empty %}
+    <form id="logsForm" method="post" action="{% url 'robot_logs:assign_logs_to_group' %}">
+        {% csrf_token %}
+        <div class="table-responsive">
+            <table class="table table-striped table-hover">
+                <thead>
                     <tr>
-                        <td colspan="6" class="text-center">Aucun log trouvé.</td>
+                        <th>
+                            <input type="checkbox" id="selectAll" class="form-check-input">
+                        </th>
+                        <th>Date/Heure</th>
+                        <th>Robot ID</th>
+                        <th>Niveau</th>
+                        <th>Type</th>
+                        <th>Groupe</th>
+                        <th>Message</th>
+                        <th>Source</th>
                     </tr>
-                {% endfor %}
-            </tbody>
-        </table>
-    </div>
+                </thead>
+                <tbody>
+                    {% for log in logs %}
+                        <tr class="log-{{ log.level|lower }}">
+                            <td>
+                                <input type="checkbox" name="log_ids" value="{{ log.id }}" class="form-check-input log-checkbox">
+                            </td>
+                            <td>{{ log.timestamp|date:"Y-m-d H:i:s" }}</td>
+                            <td>{{ log.robot_id }}</td>
+                            <td>{{ log.level }}</td>
+                            <td>{{ log.get_log_type_display }}</td>
+                            <td>
+                                {% if log.group %}
+                                <a href="{% url 'robot_logs:log_group_detail' pk=log.group.id %}" class="badge bg-info text-decoration-none">
+                                    {{ log.group.name }}
+                                </a>
+                                {% else %}
+                                -
+                                {% endif %}
+                            </td>
+                            <td>
+                                <a href="{% url 'robot_logs:log_detail' log.pk %}">
+                                    {{ log.message|truncatechars:100 }}
+                                </a>
+                            </td>
+                            <td>{{ log.source }}</td>
+                        </tr>
+                    {% empty %}
+                        <tr>
+                            <td colspan="8" class="text-center">Aucun log trouvé.</td>
+                        </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+    </form>
     
     {% if is_paginated %}
     <nav aria-label="Pagination">
@@ -158,6 +194,46 @@
         </ul>
     </nav>
     {% endif %}
+
+    <!-- Modal pour assigner à un groupe -->
+    <div class="modal fade" id="assignToGroupModal" tabindex="-1" aria-labelledby="assignToGroupModalLabel" aria-hidden="true">
+        <div class="modal-dialog">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h5 class="modal-title" id="assignToGroupModalLabel">Assigner les logs à un groupe</h5>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+                </div>
+                <div class="modal-body">
+                    <p>Sélectionnez un groupe existant ou créez un nouveau groupe pour les logs sélectionnés.</p>
+                    
+                    <div class="mb-3">
+                        <label for="group" class="form-label">Groupe existant</label>
+                        <select class="form-select" id="group" name="group" form="logsForm">
+                            <option value="">Créer un nouveau groupe</option>
+                            {% for group in groups %}
+                                <option value="{{ group.id }}">{{ group.name }}</option>
+                            {% endfor %}
+                        </select>
+                    </div>
+                    
+                    <div id="newGroupFields">
+                        <div class="mb-3">
+                            <label for="new_group_name" class="form-label">Nom du nouveau groupe</label>
+                            <input type="text" class="form-control" id="new_group_name" name="new_group_name" form="logsForm">
+                        </div>
+                        <div class="mb-3">
+                            <label for="new_group_description" class="form-label">Description</label>
+                            <textarea class="form-control" id="new_group_description" name="new_group_description" rows="3" form="logsForm"></textarea>
+                        </div>
+                    </div>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Annuler</button>
+                    <button type="button" class="btn btn-primary" id="assignButton">Assigner</button>
+                </div>
+            </div>
+        </div>
+    </div>
 {% endblock %}
 
 {% block scripts %}
@@ -200,24 +276,52 @@
             }
         });
         
-        // Ajout d'un effet lors du survol des lignes
-        $('table.table tbody tr').hover(
-            function() {
-                $(this).css('cursor', 'pointer');
-                $(this).addClass('table-active');
-            },
-            function() {
-                $(this).removeClass('table-active');
-            }
-        );
+        // Gestion du bouton "Sélectionner tout"
+        $('#selectAll').on('change', function() {
+            $('.log-checkbox').prop('checked', $(this).prop('checked'));
+        });
         
-        // Redirection vers la page de détail au clic sur une ligne
-        $('table.table tbody tr').click(function() {
-            let logId = $(this).find('a').attr('href');
-            if (logId) {
-                window.location.href = logId;
+        function toggleSelectAll() {
+            let isChecked = $('#selectAll').prop('checked');
+            $('#selectAll').prop('checked', !isChecked);
+            $('.log-checkbox').prop('checked', !isChecked);
+        }
+        
+        // Afficher/masquer les champs de nouveau groupe
+        $('#group').on('change', function() {
+            if ($(this).val() === '') {
+                $('#newGroupFields').show();
+            } else {
+                $('#newGroupFields').hide();
             }
         });
+        
+        // Gérer le clic sur le bouton d'assignation
+        $('#assignButton').click(function() {
+            // Vérifier qu'au moins un log est sélectionné
+            if ($('.log-checkbox:checked').length === 0) {
+                alert('Veuillez sélectionner au moins un log à assigner.');
+                return;
+            }
+            
+            // Vérifier qu'un groupe est sélectionné ou qu'un nom de nouveau groupe est fourni
+            let group = $('#group').val();
+            let newGroupName = $('#new_group_name').val();
+            
+            if (group === '' && newGroupName === '') {
+                alert('Veuillez sélectionner un groupe existant ou entrer un nom pour le nouveau groupe.');
+                return;
+            }
+            
+            // Tout est bon, soumettre le formulaire
+            $('#logsForm').submit();
+        });
     });
+    
+    function toggleSelectAll() {
+        let isChecked = $('#selectAll').prop('checked');
+        $('#selectAll').prop('checked', !isChecked);
+        $('.log-checkbox').prop('checked', !isChecked);
+    }
 </script>
 {% endblock %}
