@@ -6,7 +6,6 @@ import io
 import binascii
 import numpy as np
 from datetime import datetime
-from collections import Counter
 
 from django.core.files.base import ContentFile
 
