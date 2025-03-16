@@ -59,7 +59,7 @@
         <div class="col-md-9">
             <div class="card">
                 <div class="card-header">
-                    <h5>Groupes ({{ log_groups.count }})</h5>
+                    <h5>Groupes ({{ log_groups|length }})</h5>
                 </div>
                 <div class="card-body">
                     {% if log_groups %}
@@ -84,7 +84,7 @@
                                         </a>
                                     </td>
                                     <td>{{ group.robot_id|default:"-" }}</td>
-                                    <td>{{ group.log_count }}</td>
+                                    <td>{{ group.get_log_count }}</td>
                                     <td>
                                         {% if group.start_time %}
                                             {{ group.start_time|date:"d/m/Y H:i" }}
