@@ -74,6 +74,25 @@ class LogDetailView(DetailView):
     template_name = 'robot_logs/log_detail.html'
     context_object_name = 'log'
     
+    def get(self, request, *args, **kwargs):
+        log = self.get_object()
+        
+        # Si le log est de type CURVE, rediriger directement vers la vue de courbe
+        if log.log_type == 'CURVE':
+            return redirect('robot_logs:curve_view', log_id=log.id)
+        # Si le log est de type LASER2D, rediriger directement vers la vue laser
+        elif log.log_type == 'LASER2D':
+            return redirect('robot_logs:laser_view', log_id=log.id)
+        # Si le log est de type IMAGE, rediriger directement vers la vue image
+        elif log.log_type == 'IMAGE':
+            return redirect('robot_logs:image_view', log_id=log.id)
+        # Si le log est de type CAN, rediriger directement vers la vue CAN
+        elif log.log_type == 'CAN':
+            return redirect('robot_logs:can_view', log_id=log.id)
+        # Sinon, afficher la vue détaillée standard
+        else:
+            return super().get(request, *args, **kwargs)
+    
     def get_context_data(self, **kwargs):
         context = super().get_context_data(**kwargs)
         log = self.get_object()
@@ -124,7 +143,7 @@ def export_logs_csv(request):
         queryset = queryset.filter(timestamp__lte=date_end)
     
     response = HttpResponse(content_type='text/csv')
-    response['Content-Disposition'] = 'attachment; filename="robot_logs.csv"'
+    response['Content-Disposition'] = 'attachment; filename=\"robot_logs.csv\"'
     
     writer = csv.writer(response)
     writer.writerow(['Date/Heure', 'Robot ID', 'Niveau', 'Type', 'Message', 'Source'])
