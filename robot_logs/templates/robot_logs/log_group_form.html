@@ -1,0 +1,138 @@
+{% extends 'base.html' %}
+{% load static %}
+
+{% block title %}
+    {% if form.instance.id %}
+        Modifier le groupe: {{ form.instance.name }}
+    {% else %}
+        Nouveau groupe de logs
+    {% endif %}
+{% endblock %}
+
+{% block content %}
+<div class="container mt-4">
+    <nav aria-label="breadcrumb">
+        <ol class="breadcrumb">
+            <li class="breadcrumb-item"><a href="{% url 'robot_logs:log_list' %}">Logs</a></li>
+            <li class="breadcrumb-item"><a href="{% url 'robot_logs:log_group_list' %}">Groupes</a></li>
+            {% if form.instance.id %}
+                <li class="breadcrumb-item"><a href="{% url 'robot_logs:log_group_detail' pk=form.instance.id %}">{{ form.instance.name }}</a></li>
+                <li class="breadcrumb-item active" aria-current="page">Modifier</li>
+            {% else %}
+                <li class="breadcrumb-item active" aria-current="page">Nouveau groupe</li>
+            {% endif %}
+        </ol>
+    </nav>
+
+    <div class="card">
+        <div class="card-header">
+            <h2>
+                {% if form.instance.id %}
+                    Modifier le groupe: {{ form.instance.name }}
+                {% else %}
+                    Nouveau groupe de logs
+                {% endif %}
+            </h2>
+        </div>
+        <div class="card-body">
+            <form method="post">
+                {% csrf_token %}
+                
+                <div class="mb-3">
+                    <label for="id_name" class="form-label">Nom *</label>
+                    <input type="text" class="form-control" id="id_name" name="name" value="{{ form.instance.name }}" required>
+                    {% if form.name.errors %}
+                        <div class="invalid-feedback d-block">
+                            {% for error in form.name.errors %}
+                                {{ error }}
+                            {% endfor %}
+                        </div>
+                    {% endif %}
+                </div>
+                
+                <div class="mb-3">
+                    <label for="id_description" class="form-label">Description</label>
+                    <textarea class="form-control" id="id_description" name="description" rows="3">{{ form.instance.description }}</textarea>
+                    {% if form.description.errors %}
+                        <div class="invalid-feedback d-block">
+                            {% for error in form.description.errors %}
+                                {{ error }}
+                            {% endfor %}
+                        </div>
+                    {% endif %}
+                </div>
+                
+                <div class="mb-3">
+                    <label for="id_robot_id" class="form-label">Robot ID</label>
+                    <input type="text" class="form-control" id="id_robot_id" name="robot_id" value="{{ form.instance.robot_id|default:'' }}">
+                    {% if form.robot_id.errors %}
+                        <div class="invalid-feedback d-block">
+                            {% for error in form.robot_id.errors %}
+                                {{ error }}
+                            {% endfor %}
+                        </div>
+                    {% endif %}
+                </div>
+                
+                <div class="mb-3">
+                    <label for="id_tags" class="form-label">Tags</label>
+                    <input type="text" class="form-control" id="id_tags" name="tags" value="{{ form.instance.tags|default:'' }}" placeholder="test, validation, erreur">
+                    <div class="form-text">Entrez des tags séparés par des virgules.</div>
+                    {% if form.tags.errors %}
+                        <div class="invalid-feedback d-block">
+                            {% for error in form.tags.errors %}
+                                {{ error }}
+                            {% endfor %}
+                        </div>
+                    {% endif %}
+                </div>
+                
+                <div class="row">
+                    <div class="col-md-6">
+                        <div class="mb-3">
+                            <label for="id_start_time" class="form-label">Date de début</label>
+                            <input type="datetime-local" class="form-control" id="id_start_time" name="start_time" value="{{ form.instance.start_time|date:'Y-m-d\TH:i' }}">
+                            {% if form.start_time.errors %}
+                                <div class="invalid-feedback d-block">
+                                    {% for error in form.start_time.errors %}
+                                        {{ error }}
+                                    {% endfor %}
+                                </div>
+                            {% endif %}
+                        </div>
+                    </div>
+                    <div class="col-md-6">
+                        <div class="mb-3">
+                            <label for="id_end_time" class="form-label">Date de fin</label>
+                            <input type="datetime-local" class="form-control" id="id_end_time" name="end_time" value="{{ form.instance.end_time|date:'Y-m-d\TH:i' }}">
+                            {% if form.end_time.errors %}
+                                <div class="invalid-feedback d-block">
+                                    {% for error in form.end_time.errors %}
+                                        {{ error }}
+                                    {% endfor %}
+                                </div>
+                            {% endif %}
+                        </div>
+                    </div>
+                </div>
+                
+                <div class="d-flex justify-content-between mt-4">
+                    {% if form.instance.id %}
+                        <a href="{% url 'robot_logs:log_group_detail' pk=form.instance.id %}" class="btn btn-secondary">
+                            <i class="fas fa-times"></i> Annuler
+                        </a>
+                    {% else %}
+                        <a href="{% url 'robot_logs:log_group_list' %}" class="btn btn-secondary">
+                            <i class="fas fa-times"></i> Annuler
+                        </a>
+                    {% endif %}
+                    
+                    <button type="submit" class="btn btn-primary">
+                        <i class="fas fa-save"></i> Enregistrer
+                    </button>
+                </div>
+            </form>
+        </div>
+    </div>
+</div>
+{% endblock %}
