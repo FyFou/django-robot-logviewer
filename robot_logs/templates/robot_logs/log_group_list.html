@@ -1,0 +1,217 @@
+{% extends 'base.html' %}
+{% load static %}
+
+{% block title %}Groupes de logs{% endblock %}
+
+{% block content %}
+<div class="container mt-4">
+    <div class="d-flex justify-content-between align-items-center">
+        <h1>Groupes de logs</h1>
+        <button type="button" class="btn btn-primary" data-bs-toggle="modal" data-bs-target="#createGroupModal">
+            <i class="fas fa-plus"></i> Nouveau groupe
+        </button>
+    </div>
+    
+    <div class="row mt-3">
+        <div class="col-md-3">
+            <div class="card">
+                <div class="card-header">
+                    <h5>Filtres</h5>
+                </div>
+                <div class="card-body">
+                    <form method="get" action="{% url 'robot_logs:log_group_list' %}">
+                        <div class="mb-3">
+                            <label for="search" class="form-label">Recherche</label>
+                            <input type="text" class="form-control" id="search" name="search" value="{{ request.GET.search|default:'' }}">
+                        </div>
+                        
+                        {% if robot_ids %}
+                        <div class="mb-3">
+                            <label for="robot_id" class="form-label">Robot ID</label>
+                            <select class="form-select" id="robot_id" name="robot_id">
+                                <option value="">Tous les robots</option>
+                                {% for robot_id in robot_ids %}
+                                <option value="{{ robot_id }}" {% if request.GET.robot_id == robot_id %}selected{% endif %}>{{ robot_id }}</option>
+                                {% endfor %}
+                            </select>
+                        </div>
+                        {% endif %}
+                        
+                        {% if tags %}
+                        <div class="mb-3">
+                            <label for="tag" class="form-label">Tags</label>
+                            <select class="form-select" id="tag" name="tag">
+                                <option value="">Tous les tags</option>
+                                {% for tag in tags %}
+                                <option value="{{ tag }}" {% if request.GET.tag == tag %}selected{% endif %}>{{ tag }}</option>
+                                {% endfor %}
+                            </select>
+                        </div>
+                        {% endif %}
+                        
+                        <button type="submit" class="btn btn-primary">Filtrer</button>
+                        <a href="{% url 'robot_logs:log_group_list' %}" class="btn btn-secondary">Réinitialiser</a>
+                    </form>
+                </div>
+            </div>
+        </div>
+        
+        <div class="col-md-9">
+            <div class="card">
+                <div class="card-header">
+                    <h5>Groupes ({{ log_groups.count }})</h5>
+                </div>
+                <div class="card-body">
+                    {% if log_groups %}
+                    <div class="table-responsive">
+                        <table class="table table-hover">
+                            <thead>
+                                <tr>
+                                    <th>Nom</th>
+                                    <th>Robot ID</th>
+                                    <th>Nb logs</th>
+                                    <th>Période</th>
+                                    <th>Tags</th>
+                                    <th>Actions</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                {% for group in log_groups %}
+                                <tr>
+                                    <td>
+                                        <a href="{% url 'robot_logs:log_group_detail' pk=group.id %}">
+                                            {{ group.name }}
+                                        </a>
+                                    </td>
+                                    <td>{{ group.robot_id|default:"-" }}</td>
+                                    <td>{{ group.log_count }}</td>
+                                    <td>
+                                        {% if group.start_time %}
+                                            {{ group.start_time|date:"d/m/Y H:i" }}
+                                            {% if group.end_time %}
+                                                <br><small>à</small><br>
+                                                {{ group.end_time|date:"d/m/Y H:i" }}
+                                            {% endif %}
+                                        {% else %}
+                                            -
+                                        {% endif %}
+                                    </td>
+                                    <td>
+                                        {% if group.tags %}
+                                            {% for tag in group.tags.split %}
+                                                <span class="badge bg-primary">{{ tag }}</span>
+                                            {% endfor %}
+                                        {% else %}
+                                            -
+                                        {% endif %}
+                                    </td>
+                                    <td>
+                                        <div class="btn-group">
+                                            <a href="{% url 'robot_logs:log_group_detail' pk=group.id %}" class="btn btn-sm btn-outline-primary">
+                                                <i class="fas fa-eye"></i>
+                                            </a>
+                                            <a href="{% url 'robot_logs:log_group_update' pk=group.id %}" class="btn btn-sm btn-outline-secondary">
+                                                <i class="fas fa-edit"></i>
+                                            </a>
+                                            <a href="{% url 'robot_logs:log_group_delete' pk=group.id %}" class="btn btn-sm btn-outline-danger">
+                                                <i class="fas fa-trash"></i>
+                                            </a>
+                                        </div>
+                                    </td>
+                                </tr>
+                                {% endfor %}
+                            </tbody>
+                        </table>
+                    </div>
+                    
+                    {% if is_paginated %}
+                    <nav aria-label="Page navigation">
+                        <ul class="pagination justify-content-center">
+                            {% if page_obj.has_previous %}
+                            <li class="page-item">
+                                <a class="page-link" href="?page=1{% for key, value in request.GET.items %}{% if key != 'page' %}&{{ key }}={{ value }}{% endif %}{% endfor %}" aria-label="First">
+                                    <span aria-hidden="true">&laquo;&laquo;</span>
+                                </a>
+                            </li>
+                            <li class="page-item">
+                                <a class="page-link" href="?page={{ page_obj.previous_page_number }}{% for key, value in request.GET.items %}{% if key != 'page' %}&{{ key }}={{ value }}{% endif %}{% endfor %}" aria-label="Previous">
+                                    <span aria-hidden="true">&laquo;</span>
+                                </a>
+                            </li>
+                            {% endif %}
+                            
+                            {% for num in page_obj.paginator.page_range %}
+                                {% if page_obj.number == num %}
+                                <li class="page-item active"><a class="page-link" href="#">{{ num }}</a></li>
+                                {% elif num > page_obj.number|add:'-3' and num < page_obj.number|add:'3' %}
+                                <li class="page-item">
+                                    <a class="page-link" href="?page={{ num }}{% for key, value in request.GET.items %}{% if key != 'page' %}&{{ key }}={{ value }}{% endif %}{% endfor %}">{{ num }}</a>
+                                </li>
+                                {% endif %}
+                            {% endfor %}
+                            
+                            {% if page_obj.has_next %}
+                            <li class="page-item">
+                                <a class="page-link" href="?page={{ page_obj.next_page_number }}{% for key, value in request.GET.items %}{% if key != 'page' %}&{{ key }}={{ value }}{% endif %}{% endfor %}" aria-label="Next">
+                                    <span aria-hidden="true">&raquo;</span>
+                                </a>
+                            </li>
+                            <li class="page-item">
+                                <a class="page-link" href="?page={{ page_obj.paginator.num_pages }}{% for key, value in request.GET.items %}{% if key != 'page' %}&{{ key }}={{ value }}{% endif %}{% endfor %}" aria-label="Last">
+                                    <span aria-hidden="true">&raquo;&raquo;</span>
+                                </a>
+                            </li>
+                            {% endif %}
+                        </ul>
+                    </nav>
+                    {% endif %}
+                    
+                    {% else %}
+                    <div class="alert alert-info">
+                        Aucun groupe de logs trouvé. Créez un nouveau groupe pour organiser vos logs.
+                    </div>
+                    {% endif %}
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Modal pour créer un nouveau groupe -->
+<div class="modal fade" id="createGroupModal" tabindex="-1" aria-labelledby="createGroupModalLabel" aria-hidden="true">
+    <div class="modal-dialog">
+        <div class="modal-content">
+            <form method="post" action="{% url 'robot_logs:log_group_create' %}">
+                {% csrf_token %}
+                <div class="modal-header">
+                    <h5 class="modal-title" id="createGroupModalLabel">Nouveau groupe de logs</h5>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+                </div>
+                <div class="modal-body">
+                    <div class="mb-3">
+                        <label for="id_name" class="form-label">Nom</label>
+                        <input type="text" class="form-control" id="id_name" name="name" required>
+                    </div>
+                    <div class="mb-3">
+                        <label for="id_description" class="form-label">Description</label>
+                        <textarea class="form-control" id="id_description" name="description" rows="3"></textarea>
+                    </div>
+                    <div class="mb-3">
+                        <label for="id_robot_id" class="form-label">Robot ID</label>
+                        <input type="text" class="form-control" id="id_robot_id" name="robot_id">
+                    </div>
+                    <div class="mb-3">
+                        <label for="id_tags" class="form-label">Tags</label>
+                        <input type="text" class="form-control" id="id_tags" name="tags" placeholder="test, validation, erreur">
+                        <div class="form-text">Entrez des tags séparés par des virgules.</div>
+                    </div>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Annuler</button>
+                    <button type="submit" class="btn btn-primary">Créer</button>
+                </div>
+            </form>
+        </div>
+    </div>
+</div>
+{% endblock %}
