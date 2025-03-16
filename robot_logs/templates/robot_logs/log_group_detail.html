@@ -9,13 +9,21 @@
         <ol class="breadcrumb">
             <li class="breadcrumb-item"><a href="{% url 'robot_logs:log_list' %}">Logs</a></li>
             <li class="breadcrumb-item"><a href="{% url 'robot_logs:log_group_list' %}">Groupes</a></li>
+            {% if log_group.parent_group %}
+            <li class="breadcrumb-item"><a href="{% url 'robot_logs:log_group_detail' pk=log_group.parent_group.id %}">{{ log_group.parent_group.name }}</a></li>
+            {% endif %}
             <li class="breadcrumb-item active" aria-current="page">{{ log_group.name }}</li>
         </ol>
     </nav>
 
     <div class="card mb-4">
         <div class="card-header d-flex justify-content-between align-items-center">
-            <h2>{{ log_group.name }}</h2>
+            <h2>
+                {{ log_group.name }}
+                {% if log_group.is_channel_group %}
+                <span class="badge bg-info ms-2">Channel Group {{ log_group.channel_group_index }}</span>
+                {% endif %}
+            </h2>
             <div class="btn-group">
                 <button type="button" class="btn btn-primary" data-bs-toggle="modal" data-bs-target="#editGroupModal">
                     <i class="fas fa-edit"></i> Modifier
@@ -34,6 +42,20 @@
                         
                         <dt class="col-sm-4">Nombre de logs:</dt>
                         <dd class="col-sm-8">{{ log_count }}</dd>
+                        
+                        {% if log_group.is_channel_group %}
+                        <dt class="col-sm-4">Groupe parent:</dt>
+                        <dd class="col-sm-8">
+                            <a href="{% url 'robot_logs:log_group_detail' pk=log_group.parent_group.id %}">
+                                {{ log_group.parent_group.name }}
+                            </a>
+                        </dd>
+                        <dt class="col-sm-4">Index channel group:</dt>
+                        <dd class="col-sm-8">{{ log_group.channel_group_index }}</dd>
+                        {% else %}
+                        <dt class="col-sm-4">Channel groups:</dt>
+                        <dd class="col-sm-8">{{ channel_groups_count|default:"0" }}</dd>
+                        {% endif %}
                         
                         <dt class="col-sm-4">Période:</dt>
                         <dd class="col-sm-8">
@@ -66,6 +88,42 @@
             </div>
         </div>
     </div>
+
+    {% if not log_group.is_channel_group and channel_groups %}
+    <div class="card mb-4">
+        <div class="card-header">
+            <h4>Channel Groups</h4>
+        </div>
+        <div class="card-body">
+            <div class="table-responsive">
+                <table class="table table-striped">
+                    <thead>
+                        <tr>
+                            <th>Nom</th>
+                            <th>Index</th>
+                            <th>Nombre de logs</th>
+                            <th>Actions</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {% for group in channel_groups %}
+                        <tr>
+                            <td>{{ group.name }}</td>
+                            <td>{{ group.channel_group_index }}</td>
+                            <td>{{ group.logs.count }}</td>
+                            <td>
+                                <a href="{% url 'robot_logs:log_group_detail' pk=group.id %}" class="btn btn-sm btn-outline-primary">
+                                    <i class="fas fa-eye"></i> Voir
+                                </a>
+                            </td>
+                        </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+    {% endif %}
 
     <div class="card">
         <div class="card-header d-flex justify-content-between align-items-center">
@@ -178,6 +236,9 @@
                                 <th>Date/Heure</th>
                                 <th>Niveau</th>
                                 <th>Type</th>
+                                {% if not log_group.is_channel_group %}
+                                <th>Channel Group</th>
+                                {% endif %}
                                 <th>Message</th>
                                 <th>Source</th>
                                 <th>Actions</th>
@@ -192,6 +253,15 @@
                                 <td>{{ log.timestamp|date:"Y-m-d H:i:s" }}</td>
                                 <td><span class="badge {% if log.level == 'DEBUG' %}bg-secondary{% elif log.level == 'INFO' %}bg-info{% elif log.level == 'WARNING' %}bg-warning{% elif log.level == 'ERROR' %}bg-danger{% elif log.level == 'CRITICAL' %}bg-dark{% endif %}">{{ log.level }}</span></td>
                                 <td>{{ log.get_log_type_display }}</td>
+                                {% if not log_group.is_channel_group %}
+                                <td>
+                                    {% if log.channel_group_index is not None %}
+                                    <span class="badge bg-info">{{ log.channel_group_index }}</span>
+                                    {% else %}
+                                    -
+                                    {% endif %}
+                                </td>
+                                {% endif %}
                                 <td>{{ log.message|truncatechars:50 }}</td>
                                 <td>{{ log.source }}</td>
                                 <td>
