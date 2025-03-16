@@ -13,12 +13,23 @@ class LogGroup(models.Model):
     tags = models.CharField(max_length=255, blank=True, null=True, 
                            help_text="Tags séparés par des virgules pour faciliter la recherche")
     
+    # Nouveaux champs pour les channel groups
+    is_channel_group = models.BooleanField(default=False, 
+                                         help_text="Indique si ce groupe représente un channel group MDF")
+    channel_group_index = models.IntegerField(null=True, blank=True, 
+                                            help_text="Index du channel group dans le fichier MDF")
+    parent_group = models.ForeignKey('self', null=True, blank=True, on_delete=models.CASCADE, 
+                                   related_name='channel_groups',
+                                   help_text="Groupe parent si ce groupe est un channel group")
+    
     class Meta:
         ordering = ['-created_at']
         verbose_name = "Groupe de logs"
         verbose_name_plural = "Groupes de logs"
     
     def __str__(self):
+        if self.is_channel_group and self.channel_group_index is not None:
+            return f"{self.name} (Channel Group {self.channel_group_index})"
         return self.name
     
     def get_absolute_url(self):
@@ -27,6 +38,10 @@ class LogGroup(models.Model):
     def get_log_count(self):
         """Retourne le nombre de logs dans ce groupe"""
         return self.logs.count()
+    
+    def get_channel_groups_count(self):
+        """Retourne le nombre de channel groups enfants"""
+        return self.channel_groups.count()
     
     def get_log_types_summary(self):
         """Retourne un résumé des types de logs dans ce groupe"""
@@ -72,6 +87,10 @@ class RobotLog(models.Model):
     
     # Pour les métadonnées JSON
     metadata = models.TextField(null=True, blank=True)
+    
+    # Nouveau champ pour stocker les informations du channel group d'origine
+    channel_group_index = models.IntegerField(null=True, blank=True, 
+                                            help_text="Index du channel group d'origine dans le fichier MDF")
     
     def get_metadata_as_dict(self):
         """Convertit les métadonnées JSON en dictionnaire Python"""
@@ -186,6 +205,23 @@ class MDFFile(models.Model):
     # Associer automatiquement un groupe pour les logs générés par ce fichier MDF
     log_group = models.ForeignKey(LogGroup, on_delete=models.SET_NULL, 
                                  null=True, blank=True, related_name='mdf_files')
+    
+    # Nouveau champ pour stocker les métadonnées sur les channel groups
+    channel_groups_info = models.TextField(null=True, blank=True, 
+                                         help_text="Informations JSON sur les channel groups du fichier")
+    
+    def get_channel_groups_info(self):
+        """Récupère les informations sur les channel groups au format JSON"""
+        if self.channel_groups_info:
+            try:
+                return json.loads(self.channel_groups_info)
+            except json.JSONDecodeError:
+                return {}
+        return {}
+    
+    def set_channel_groups_info(self, info_dict):
+        """Enregistre les informations sur les channel groups au format JSON"""
+        self.channel_groups_info = json.dumps(info_dict)
     
     def __str__(self):
         return self.name
