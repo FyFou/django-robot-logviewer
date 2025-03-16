@@ -38,8 +38,8 @@ def _process_text_event(self, channel_name, signal):
             level="INFO",  # Niveau par défaut
             message=f"{channel_name}: {value}",
             source=f"MDF Import: {self.mdf_file.name if self.mdf_file else 'Unknown'}",
-            log_type="TEXT",
-            group=self._log_group  # Assignation directe au groupe
+            log_type="TEXT"
+            # Ne pas assigner au groupe ici, cela sera fait par process_channel
         )
         
         # Ajouter des métadonnées
@@ -47,8 +47,8 @@ def _process_text_event(self, channel_name, signal):
             'channel_name': channel_name,
             'sample_index': i,
             'unit': signal.unit if hasattr(signal, 'unit') else None,
-            'comment': signal.comment if hasattr(signal, 'comment') else None,
-            'group_id': self._log_group.id if self._log_group else None,  # Ajouter l'ID du groupe
+            'comment': signal.comment if hasattr(signal, 'comment') else None
+            # Ne pas ajouter group_id ici, cela sera fait par process_channel
         }
         log.set_metadata_from_dict(metadata)
         
@@ -65,8 +65,8 @@ def _process_curve_data(self, channel_name, signal):
         level="INFO",
         message=f"Données de courbe pour {channel_name}",
         source=f"MDF Import: {self.mdf_file.name if self.mdf_file else 'Unknown'}",
-        log_type="CURVE",
-        group=self._log_group  # Assignation directe au groupe
+        log_type="CURVE"
+        # Ne pas assigner au groupe ici, cela sera fait par process_channel
     )
     
     # Ajouter des métadonnées
@@ -76,8 +76,8 @@ def _process_curve_data(self, channel_name, signal):
         'unit': signal.unit if hasattr(signal, 'unit') else None,
         'start_time': signal.timestamps[0],
         'end_time': signal.timestamps[-1],
-        'duration': signal.timestamps[-1] - signal.timestamps[0],
-        'group_id': self._log_group.id if self._log_group else None,  # Ajouter l'ID du groupe
+        'duration': signal.timestamps[-1] - signal.timestamps[0]
+        # Ne pas ajouter group_id ici, cela sera fait par process_channel
     }
     main_log.set_metadata_from_dict(metadata)
     
@@ -102,8 +102,8 @@ def _process_laser_data(self, channel_name, signal):
         level="INFO",
         message=f"Données laser 2D pour {channel_name}",
         source=f"MDF Import: {self.mdf_file.name if self.mdf_file else 'Unknown'}",
-        log_type="LASER2D",
-        group=self._log_group  # Assignation directe au groupe
+        log_type="LASER2D"
+        # Ne pas assigner au groupe ici, cela sera fait par process_channel
     )
     
     # Estimer les paramètres du laser
@@ -119,8 +119,8 @@ def _process_laser_data(self, channel_name, signal):
         'unit': signal.unit if hasattr(signal, 'unit') else 'm',
         'angle_min': angle_min,
         'angle_max': angle_max,
-        'angle_increment': angle_increment,
-        'group_id': self._log_group.id if self._log_group else None,  # Ajouter l'ID du groupe
+        'angle_increment': angle_increment
+        # Ne pas ajouter group_id ici, cela sera fait par process_channel
     }
     main_log.set_metadata_from_dict(metadata)
     
@@ -149,8 +149,8 @@ def _process_image_data(self, channel_name, signal):
         level="INFO",
         message=f"Image pour {channel_name}",
         source=f"MDF Import: {self.mdf_file.name if self.mdf_file else 'Unknown'}",
-        log_type="IMAGE",
-        group=self._log_group  # Assignation directe au groupe
+        log_type="IMAGE"
+        # Ne pas assigner au groupe ici, cela sera fait par process_channel
     )
     
     # Essayer de déterminer le type d'image et de la décoder
@@ -182,13 +182,13 @@ def _process_image_data(self, channel_name, signal):
             save=False
         )
         
-        # Ajouter des métadonnées avec l'ID du groupe
+        # Ajouter des métadonnées sans l'ID du groupe
         metadata = {
             'channel_name': channel_name,
             'width': img.width,
             'height': img.height,
-            'format': img.format if img.format else 'JPEG',
-            'group_id': self._log_group.id if self._log_group else None,  # Ajouter l'ID du groupe
+            'format': img.format if img.format else 'JPEG'
+            # Ne pas ajouter group_id ici, cela sera fait par process_channel
         }
         main_log.set_metadata_from_dict(metadata)
         
@@ -201,8 +201,8 @@ def _process_image_data(self, channel_name, signal):
         metadata = {
             'channel_name': channel_name,
             'data_size': len(signal.samples),
-            'error': str(e),
-            'group_id': self._log_group.id if self._log_group else None,  # Ajouter l'ID du groupe
+            'error': str(e)
+            # Ne pas ajouter group_id ici, cela sera fait par process_channel
         }
         main_log.set_metadata_from_dict(metadata)
         
@@ -217,8 +217,8 @@ def _process_can_data(self, channel_name, signal):
         level="INFO",
         message=f"Données CAN pour {channel_name}",
         source=f"MDF Import: {self.mdf_file.name if self.mdf_file else 'Unknown'}",
-        log_type="CAN",
-        group=self._log_group  # Assignation directe au groupe
+        log_type="CAN"
+        # Ne pas assigner au groupe ici, cela sera fait par process_channel
     )
     
     # Ajouter des métadonnées
@@ -227,8 +227,8 @@ def _process_can_data(self, channel_name, signal):
         'samples_count': len(signal.samples),
         'start_time': signal.timestamps[0],
         'end_time': signal.timestamps[-1],
-        'duration': signal.timestamps[-1] - signal.timestamps[0],
-        'group_id': self._log_group.id if self._log_group else None,  # Ajouter l'ID du groupe
+        'duration': signal.timestamps[-1] - signal.timestamps[0]
+        # Ne pas ajouter group_id ici, cela sera fait par process_channel
     }
     
     # Si nous avons un parser DBC, ajouter l'info
