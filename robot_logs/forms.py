@@ -1,5 +1,5 @@
 from django import forms
-from .models import MDFFile, LogGroup, RobotLog
+from .models import MDFFile, LogGroup, RobotLog, DBCFile
 from django.utils import timezone
 
 class MDFImportForm(forms.ModelForm):
@@ -20,6 +20,26 @@ class MDFImportForm(forms.ModelForm):
         help_texts = {
             'name': 'Nom descriptif pour identifier ce fichier',
             'file': 'Fichier MDF (.mf4, .mdf) à importer',
+        }
+
+class DBCFileForm(forms.ModelForm):
+    """Formulaire pour télécharger ou modifier un fichier DBC"""
+    
+    class Meta:
+        model = DBCFile
+        fields = ['name', 'description', 'file']
+        labels = {
+            'name': 'Nom',
+            'description': 'Description',
+            'file': 'Fichier DBC',
+        }
+        help_texts = {
+            'name': 'Nom descriptif pour identifier ce fichier',
+            'description': 'Description optionnelle du contenu ou de l\'usage de ce fichier',
+            'file': 'Fichier DBC (.dbc) à télécharger',
+        }
+        widgets = {
+            'description': forms.Textarea(attrs={'rows': 3}),
         }
 
 class LogGroupForm(forms.ModelForm):
