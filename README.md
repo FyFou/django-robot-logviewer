@@ -10,6 +10,7 @@ Cette application permet de visualiser, filtrer et exporter les logs de robots d
 - Interface d'administration pour la gestion des logs
 - Actualisation automatique des logs
 - Support pour les fichiers MDF (Measurement Data Format)
+- Support des channel groups pour une meilleure organisation des données
 - Visualisation de courbes, données laser 2D et images
 
 ## Installation
@@ -68,10 +69,30 @@ L'application prend en charge l'importation de fichiers MDF (Measurement Data Fo
 1. Cliquez sur le bouton "Importer fichier MDF" sur la page principale
 2. Sélectionnez votre fichier MDF et donnez-lui un nom descriptif
 3. Choisissez si vous souhaitez prévisualiser le contenu avant l'importation
-4. Confirmez l'importation
-5. Consultez les logs générés dans l'interface principale
+4. Activez ou désactivez l'option "Utiliser les channel groups" selon vos besoins
+5. Confirmez l'importation
+6. Consultez les logs générés dans l'interface principale
 
 Les différents types de données (texte, courbes, laser 2D, images) seront automatiquement détectés et des visualisations appropriées seront générées.
+
+### Support des Channel Groups
+
+La fonctionnalité de channel groups permet d'organiser les logs selon la structure originale du fichier MDF:
+
+- Lors de l'importation, un groupe principal est créé pour le fichier
+- Des sous-groupes sont créés pour chaque channel group du fichier MDF
+- Les logs sont organisés hiérarchiquement dans ces groupes
+- La navigation et l'analyse sont ainsi facilitées
+
+Pour plus de détails, consultez la [documentation des channel groups](README_CHANNEL_GROUPS.md).
+
+### Support des données CAN
+
+Pour les données CAN, consultez la [documentation spécifique](README_CAN_DBC.md).
+
+### Support des courbes
+
+Pour les données de courbes, consultez la [documentation dédiée](README_CURVES.md).
 
 ### Générer un fichier MDF de test
 
