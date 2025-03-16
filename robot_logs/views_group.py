@@ -6,7 +6,7 @@ from django.contrib import messages
 from django.http import HttpResponseRedirect, JsonResponse
 from django.contrib.auth.mixins import LoginRequiredMixin
 
-from .models import LogGroup, RobotLog
+from .models import LogGroup, RobotLog, MDFFile
 from .forms import LogGroupForm, AssignLogsToGroupForm
 
 import json
@@ -15,7 +15,7 @@ import logging
 logger = logging.getLogger(__name__)
 
 class LogGroupListView(ListView):
-    """Vue pour afficher la liste des groupes de logs"""
+    """Vue pour afficher la liste des groupes de logs, utilisée comme page d'accueil"""
     model = LogGroup
     template_name = 'robot_logs/log_group_list.html'
     context_object_name = 'log_groups'
@@ -61,6 +61,27 @@ class LogGroupListView(ListView):
         
         # Ajouter le formulaire de création de groupe
         context['form'] = LogGroupForm()
+        
+        # Statistiques pour la page d'accueil
+        context['total_logs'] = RobotLog.objects.count()
+        context['total_groups'] = LogGroup.objects.count()
+        context['logs_in_groups'] = RobotLog.objects.filter(group__isnull=False).count()
+        context['orphan_logs'] = RobotLog.objects.filter(group__isnull=True).count()
+        context['mdf_files_count'] = MDFFile.objects.count()
+        
+        # Compter par type de log
+        log_types_count = {}
+        for log_type, name in RobotLog.LOG_TYPES:
+            log_types_count[log_type] = RobotLog.objects.filter(log_type=log_type).count()
+        context['log_types_count'] = log_types_count
+        context['log_types_dict'] = dict(RobotLog.LOG_TYPES)
+        
+        # Compter par niveau de log
+        log_levels_count = {}
+        for level, name in RobotLog.LOG_LEVELS:
+            log_levels_count[level] = RobotLog.objects.filter(level=level).count()
+        context['log_levels_count'] = log_levels_count
+        context['log_levels_dict'] = dict(RobotLog.LOG_LEVELS)
         
         return context
 
@@ -108,6 +129,9 @@ class LogGroupDetailView(DetailView):
         # Ajouter le formulaire de modification
         context['form'] = LogGroupForm(instance=log_group)
         
+        # Vérifier si ce groupe est associé à un fichier MDF
+        context['mdf_files'] = log_group.mdf_files.all() if hasattr(log_group, 'mdf_files') else []
+        
         return context
 
 class LogGroupCreateView(CreateView):
@@ -140,7 +164,7 @@ class LogGroupDeleteView(DeleteView):
     """Vue pour supprimer un groupe de logs"""
     model = LogGroup
     template_name = 'robot_logs/log_group_confirm_delete.html'
-    success_url = reverse_lazy('robot_logs:log_group_list')
+    success_url = reverse_lazy('robot_logs:home')  # Rediriger vers la page d'accueil
     
     def delete(self, request, *args, **kwargs):
         log_group = self.get_object()
@@ -242,12 +266,12 @@ class MergeLGroupsView(View):
         
         if not group_ids or not target_group_id:
             messages.error(request, "Sélection invalide. Veuillez choisir des groupes à fusionner et un groupe cible.")
-            return redirect('robot_logs:log_group_list')
+            return redirect('robot_logs:home')
         
         # Vérifier que le groupe cible est dans la liste des groupes à fusionner
         if target_group_id not in group_ids:
             messages.error(request, "Le groupe cible doit faire partie des groupes sélectionnés.")
-            return redirect('robot_logs:log_group_list')
+            return redirect('robot_logs:home')
         
         target_group = get_object_or_404(LogGroup, id=target_group_id)
         groups_to_merge = LogGroup.objects.filter(id__in=group_ids).exclude(id=target_group_id)
