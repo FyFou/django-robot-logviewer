@@ -338,6 +338,47 @@ class MDFParser:
             )
             return [error_log], [], [], [], []
     
+    def fix_channel_group_relations(self):
+        """
+        Corrige les relations entre logs et channel groups
+        en s'assurant que tous les logs avec un channel_group_index
+        sont bien associés au bon channel group
+        """
+        source_pattern = ""
+        if self.mdf_file:
+            source_pattern = f"MDF Import: {self.mdf_file.name}"
+        
+        # Pour tous les logs qui ont un channel_group_index
+        logs_with_index_query = RobotLog.objects.filter(channel_group_index__isnull=False)
+        if source_pattern:
+            logs_with_index_query = logs_with_index_query.filter(source=source_pattern)
+        
+        logs_with_index = logs_with_index_query
+        logger.info(f"Vérification de {logs_with_index.count()} logs avec un channel_group_index")
+        
+        # Pour chaque log, trouver le bon channel group
+        fixed = 0
+        for log in logs_with_index:
+            # Trouver le channel group correspondant
+            channel_groups = LogGroup.objects.filter(
+                is_channel_group=True,
+                channel_group_index=log.channel_group_index
+            )
+            
+            if channel_groups.exists():
+                # Prendre le premier channel group correspondant
+                channel_group = channel_groups.first()
+                # Si le log n'est pas déjà associé à ce groupe
+                if log.group != channel_group:
+                    log.group = channel_group
+                    log.save(update_fields=['group'])
+                    fixed += 1
+        
+        if fixed > 0:
+            logger.info(f"Corrigé {fixed} relations de logs avec leurs channel groups")
+        
+        return fixed
+    
     def process_file(self, dbc_file=None, log_group=None, use_channel_groups=True):
         """
         Traite l'ensemble du fichier MDF et importe tous les canaux
@@ -480,17 +521,17 @@ class MDFParser:
             if use_channel_groups:
                 # Pour chaque log orphelin, l'associer au bon channel group s'il a un channel_group_index
                 for log in imported_logs:
-                    if hasattr(log, 'channel_group_index') and log.channel_group_index is not None:
+                    if log.channel_group_index is not None:
                         channel_group = self.get_or_create_channel_group_log_group(log.channel_group_index)
                         if channel_group:
                             log.group = channel_group
-                            log.save()
+                            log.save(update_fields=['group'])
                         else:
                             log.group = log_group
-                            log.save()
+                            log.save(update_fields=['group'])
                     else:
                         log.group = log_group
-                        log.save()
+                        log.save(update_fields=['group'])
             else:
                 # Version simple : tous au groupe principal
                 count = imported_logs.update(group=log_group)
@@ -510,6 +551,11 @@ class MDFParser:
                 elif log.log_type == 'CAN':
                     # Vérifier si des messages CAN sont orphelins
                     log.can_messages.filter(log__group__isnull=True).update(log=log)
+            
+            # Exécuter la correction des relations entre logs et channel groups
+            if use_channel_groups:
+                fixed_count = self.fix_channel_group_relations()
+                statistics['fixed_relations'] = fixed_count
         
         # Marquer le fichier MDF comme traité
         if self.mdf_file:
